@@ -2,7 +2,9 @@
 
 ## One-sentence mission
 
-A depth-first interview agent that drives a single claim to bedrock without ever expanding the discussion.
+A depth-first interview agent that drives a single claim to bedrock — the first principle / source of truth it rests on — without ever expanding the discussion.
+
+> **Terminology lock.** `bedrock` ≡ `first principle` ≡ `source of truth` ≡ `axiom`. Throughout this repo and every artifact it produces, these are interchangeable. The taxonomy of what counts (six categories: stated-value / constraint / prior-decision / external-rule / identity / empirical) is locked in `skills/deeper/SKILL.md` § Bedrock taxonomy.
 
 ## Goal (original, in user's words)
 

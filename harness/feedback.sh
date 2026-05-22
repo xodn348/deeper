@@ -27,7 +27,7 @@ touch "$BANS_FILE"
 agg=$(
   for r in $recent_runs; do
     if [ -f "$RUNS_DIR/$r/events.jsonl" ]; then
-      grep '"type":"judge_result"' "$RUNS_DIR/$r/events.jsonl" \
+      grep -E '"type"[[:space:]]*:[[:space:]]*"judge_result"' "$RUNS_DIR/$r/events.jsonl" \
         | python3 -c '
 import json, sys
 seen = set()

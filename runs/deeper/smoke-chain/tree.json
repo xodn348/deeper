@@ -1,0 +1,37 @@
+{
+  "root": {
+    "claim": "Why does the `deeper` project exist instead of using one of the existing interview skills?",
+    "tag": "from-user",
+    "bedrock": null,
+    "children": [
+      {
+        "claim": "existing skills all fight tunneling; we need the opposite",
+        "tag": "from-user",
+        "bedrock": null,
+        "children": [
+          {
+            "claim": "they're designed for general discovery, not root cause",
+            "tag": "from-user",
+            "bedrock": null,
+            "children": [
+              {
+                "claim": "root-cause investigation requires deeper, not broader",
+                "tag": "from-user",
+                "bedrock": null,
+                "children": [
+                  {
+                    "claim": "(bedrock declared at: root-cause investigation requires deeper, not broader)",
+                    "tag": "from-user",
+                    "bedrock": "stated-value",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "cursor": null
+}

@@ -1,0 +1,9 @@
+{
+  "run_id": "harness-smoke",
+  "node": "deeper",
+  "status": "hard_cap",
+  "rounds": 1,
+  "final_score": 1.0,
+  "exit_reason": "reached hard cap of 1 rounds",
+  "violations_total": {"shallow-bedrock": 1}
+}

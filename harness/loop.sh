@@ -70,7 +70,7 @@ while [ "$round" -lt "$HARD_CAP" ]; do
     final_status="failed"; exit_reason="judge.sh exited nonzero"; break
   }
 
-  last_judge=$(grep '"type":"judge_result"' "$RUN_DIR/events.jsonl" | tail -1)
+  last_judge=$(grep -E '"type"[[:space:]]*:[[:space:]]*"judge_result"' "$RUN_DIR/events.jsonl" | tail -1)
   score=$(printf '%s' "$last_judge" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("score",0))')
   done_flag=$(printf '%s' "$last_judge" | python3 -c 'import json,sys; e=json.loads(sys.stdin.read()); print("true" if e.get("score",0)>='"$DONE_THRESHOLD"' and not e.get("violations") else "false")')
 
@@ -86,7 +86,7 @@ while [ "$round" -lt "$HARD_CAP" ]; do
   fi
 done
 
-violations_aggregate=$(grep '"type":"judge_result"' "$RUN_DIR/events.jsonl" \
+violations_aggregate=$(grep -E '"type"[[:space:]]*:[[:space:]]*"judge_result"' "$RUN_DIR/events.jsonl" \
   | python3 -c '
 import json, sys
 agg = {}

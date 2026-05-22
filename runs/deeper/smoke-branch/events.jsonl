@@ -1,0 +1,5 @@
+{"ts":"2026-05-22T16:36:39Z","run_id":"smoke-branch","node":"deeper","round":1,"type":"judge_result","score":0.0,"violations":[],"detail":{"total_leaves":1,"closed_leaves":0,"max_depth":1,"cursor":[0],"done":false}}
+{"ts":"2026-05-22T16:36:39Z","run_id":"smoke-branch","node":"deeper","round":2,"type":"judge_result","score":0.0,"violations":[],"detail":{"total_leaves":2,"closed_leaves":0,"max_depth":1,"cursor":[1],"done":false}}
+{"ts":"2026-05-22T16:36:39Z","run_id":"smoke-branch","node":"deeper","round":3,"type":"judge_result","score":0.5,"violations":[],"detail":{"total_leaves":2,"closed_leaves":1,"max_depth":2,"cursor":[0],"done":false}}
+{"ts":"2026-05-22T16:36:39Z","run_id":"smoke-branch","node":"deeper","round":4,"type":"judge_result","score":0.5,"violations":[],"detail":{"total_leaves":2,"closed_leaves":1,"max_depth":2,"cursor":[0,0],"done":false}}
+{"ts":"2026-05-22T16:36:39Z","run_id":"smoke-branch","node":"deeper","round":5,"type":"judge_result","score":1.0,"violations":[],"detail":{"total_leaves":2,"closed_leaves":2,"max_depth":3,"cursor":null,"done":true}}

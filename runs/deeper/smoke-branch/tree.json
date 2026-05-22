@@ -1,0 +1,43 @@
+{
+  "root": {
+    "claim": "Why does the `deeper` project exist instead of using one of the existing interview skills?",
+    "tag": "from-user",
+    "bedrock": null,
+    "children": [
+      {
+        "claim": "cause A pushes us this way",
+        "tag": "from-user",
+        "bedrock": null,
+        "children": [
+          {
+            "claim": "rethink \u2014 A traces back to choice X",
+            "tag": "from-user",
+            "bedrock": null,
+            "children": [
+              {
+                "claim": "(bedrock declared at: rethink \u2014 A traces back to choice X)",
+                "tag": "from-user",
+                "bedrock": "prior-decision",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "claim": "cause B also pushes us this way",
+        "tag": "from-user",
+        "bedrock": null,
+        "children": [
+          {
+            "claim": "(bedrock declared at: cause B also pushes us this way)",
+            "tag": "from-user",
+            "bedrock": "constraint",
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  "cursor": null
+}

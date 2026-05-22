@@ -1,0 +1,3 @@
+{"ts":"2026-05-22T16:36:06Z","run_id":"harness-smoke","node":"deeper","round":1,"type":"agent_output","output":"round 1: cursor=None answer=\"BEDROCK:stated-value\" outcome=bedrock"}
+{"ts":"2026-05-22T16:36:06Z","run_id":"harness-smoke","node":"deeper","round":1,"type":"judge_result","score":1.0,"violations":["shallow-bedrock"],"detail":{"total_leaves":1,"closed_leaves":1,"max_depth":1,"cursor":null,"done":true}}
+{"ts":"2026-05-22T16:36:06Z","run_id":"harness-smoke","node":"deeper","round":1,"type":"ralph_iter_end","done":false,"reason":"judge_score=1.0"}
