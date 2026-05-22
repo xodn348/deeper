@@ -1,23 +1,26 @@
 # Status
 
-Phase: design-locked
+Phase: harness-verified
 
-Updated: 2026-05-21T22:30:00Z
+Updated: 2026-05-22T06:20:00Z
 
 ## What's done
 
-- 4-source interview pattern audit complete: superpowers (MIT), omx (MIT), oh-my-openagent (Sustainable Use License v1.0), ouroboros (MIT).
-- Mission locked in `spec/current.md`.
-- Skill draft written: `skills/deeper/SKILL.md`.
-- Attribution written: `docs/ATTRIBUTION.md`.
-- Pegasus placeholder task removed; replaced with 3 concrete tasks (001-003).
+- 4-source interview pattern audit (superpowers / omx / oh-my-openagent / ouroboros).
+- `skills/deeper/SKILL.md` v0 draft (single-thread depth interview).
+- `docs/ATTRIBUTION.md` IP posture per source.
+- **`harness/{loop,feedback,meta-loop}.sh` + `harness/lib/mock-model.sh`** — task-agnostic ralph + feedback infrastructure.
+- **`node-contract.md`** — what every node must provide.
+- **`nodes/commit-msg/`** — reference node (autonomous, deterministic mock).
+- **End-to-end demo: 0.25 → 1.0 across 6 meta-iterations**, 4 lessons auto-promoted to BANS.md, recorded in `runs/commit-msg/`.
 
 ## What's next
 
-- Task 001: user review of `skills/deeper/SKILL.md` draft; symlink into `~/.claude/skills/deeper/SKILL.md` once approved.
-- Task 002: bedrock + depth-meter rules are spec'd; no separate work needed unless the user wants the tables tweaked.
-- Task 003: write the 5 eval topic files under `eval/`. Needs real topics from the user — placeholders proposed in the task file.
+- Task 005 (to write): port `skills/deeper/SKILL.md` into `nodes/deeper/` shape — split into PROMPT.md (single-iteration instructions) + judge.sh (human-in-loop reader) + a `depth-trace`-shaped state.md format.
+- Decide: real-LLM demo for `commit-msg` (swap `MODEL_CMD="claude -p"`) before or after `deeper` node port.
+- Optional: lessons consolidator (LLM pass over BANS.md to merge duplicates) once BANS files start growing.
 
 ## Verification path
 
-Not verified yet. The skill is unverified until ≥3 of the 5 eval topics pass the grading rubric on a live `/deeper` run.
+- Harness: verified end-to-end with mock. See `spec/tasks/004-self-improving-harness.md` for trajectory.
+- `deeper` skill: still unverified. Verification deferred until ported into harness shape so it runs the same way as `commit-msg`.

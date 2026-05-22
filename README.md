@@ -1,35 +1,60 @@
 # deeper
 
-A depth-first interview agent. It does **not** expand the discussion. It picks one thread and drills until bedrock — root cause, axiom, physical constraint, or deliberate design choice — then stops.
+Originally: a depth-first interview agent that drives one claim to bedrock without expanding the discussion.
 
-Most existing interview frameworks (`superpowers:brainstorming`, `omx:deep-interview`, `ouroboros`) include explicit anti-tunneling guards (e.g. ouroboros has a `breadth-keeper` agent). `deeper` is what you get when you flip those guards. The single-thread tunneling **is** the feature.
+As of this commit: also the substrate for a self-improving agent harness built on Huntley's ralph loop. `deeper` is now **one node** in a general `ralph → feedback → ralph → feedback` system. The interview is the marquee node; the harness underneath is the load-bearing infrastructure.
 
-## Core idea
+## Two layers
+
+### Layer 1 — self-improving harness (built, verified end-to-end)
 
 ```
-loop:
-  q = next_depth_question(current_claim)   # Ontologist 4Q + pressure ladder
-  a = ask_user(q)                          # one question per round, no batching
-  tag a with [from-user | from-code | from-research]
-  if a opens a new topic:  REFUSE and re-anchor
-  depth_meter += depth_delta(a)
-  if bedrock_reached(a) and user_confirms_axiom(): EXIT
+harness/
+├── loop.sh          # one ralph run: read PROMPT+BANS+state → call $MODEL_CMD → judge → repeat until done or cap
+├── feedback.sh      # read N recent runs' events.jsonl → promote repeated violations to BANS.md
+├── meta-loop.sh     # run M ralph runs, calling feedback after each
+└── lib/mock-model.sh   # deterministic state-machine fake, for free demos
+node-contract.md     # what every node must provide
+nodes/<name>/        # node-specific: PROMPT.md, BANS.md, judge.sh, hard-cap.txt
+runs/<name>/<id>/    # per-run artifacts: seed.md, state.md, events.jsonl, outcome.json
 ```
 
-Output is a single artifact: `depth-trace-<topic>-<ts>.md` — a chain of `claim → why → deeper why → ... → bedrock`, with source tags, refused breadth detours logged, and a one-sentence bedrock declaration at the top.
+The harness is task-agnostic. It uses no node-specific code. Plug in a node by satisfying `node-contract.md`.
 
-## Why not just use one of the existing skills
+**Verified.** The `commit-msg` reference node starts at score 0.25 (3 hard-cap runs producing the wrong-format, wrong-length, period-trailing output) and converges to score 1.0 in 1 round after 4 lessons accumulate in `BANS.md`. Trajectory recorded in `runs/commit-msg/` and summarized in `spec/tasks/004-self-improving-harness.md`.
 
-| Skill | Posture | Problem for our use |
-|---|---|---|
-| `superpowers:brainstorming` | Diverge then converge ("propose 2-3 approaches") | Expansion is built in |
-| `omx:deep-interview` | Multi-dimension ambiguity sweep | Rotates dimensions; intentionally broad |
-| `pegasus-init` | 15-question Socratic for project briefing | Whole-project scope, not single-claim drill |
-| `gstack:office-hours` | YC-style six forcing questions | Strategic, not root-cause |
-| `ouroboros` | Has a depth-first Ontologist but a `breadth-keeper` overrides it | Anti-tunneling is enforced |
+### Layer 2 — deeper, the depth-first interview node (skill draft only, not yet refactored into the harness)
 
-`deeper` borrows freely from all of them but inverts the breadth gate.
+```
+skills/deeper/SKILL.md   # the original Claude Code skill — operational core, hand-runnable
+docs/ATTRIBUTION.md      # per-source IP posture (superpowers / omx / ouroboros MIT; omo ideas-only)
+```
+
+This needs to be ported into the `nodes/deeper/` shape so it can ride the harness. The judge for `deeper` is the user (human-in-loop), not a script — the harness already supports this via a `judge.sh` that simply prompts on stdin.
+
+## Why this exists
+
+1. **Depth-first interviewing is missing.** Every existing interview skill (`superpowers:brainstorming`, `omx:deep-interview`, `pegasus-init`, `gstack:office-hours`, `ouroboros`) explicitly fights tunneling. We need the opposite for root-cause work. → Layer 2.
+2. **Skills written into long markdown drift as conversations accumulate.** Huntley's ralph fixes this by re-injecting the same prompt every iteration with fresh context. Combining ralph with a feedback loop over structured logs gives you a system that genuinely improves run-over-run without anyone editing the prompt by hand. → Layer 1.
+
+## Quick demo (no LLM cost)
+
+```bash
+cd ~/code/deeper
+MODEL_CMD="bash harness/lib/mock-model.sh" \
+  bash harness/meta-loop.sh commit-msg nodes/commit-msg/sample-seed.md 6 1
+```
+
+Watch BANS.md fill up and the run score climb from 0.25 to 1.0.
+
+## Swap to real Claude
+
+```bash
+MODEL_CMD="claude -p" bash harness/meta-loop.sh commit-msg nodes/commit-msg/sample-seed.md 3 1
+```
+
+(Anything that reads a prompt on stdin and writes the response on stdout works — `gemini`, `codex exec`, etc.)
 
 ## Status
 
-Pre-implementation. See `spec/current.md` for the locked mission, `spec/tasks/` for next steps, the skill draft at `skills/deeper/SKILL.md`, and attributions in `docs/ATTRIBUTION.md`.
+See `workflow/status.md`.

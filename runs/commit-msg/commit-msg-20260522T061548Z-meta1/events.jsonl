@@ -1,0 +1,3 @@
+{"ts":"2026-05-22T06:15:48Z","run_id":"commit-msg-20260522T061548Z-meta1","node":"commit-msg","round":1,"type":"agent_output","output":"feat(api): add auth middleware to /api/* routes"}
+{"ts":"2026-05-22T06:15:48Z","run_id":"commit-msg-20260522T061548Z-meta1","node":"commit-msg","round":1,"type":"judge_result","score":1.0,"violations":[],"detail":{"latest":"feat(api): add auth middleware to /api/* routes","length":47}}
+{"ts":"2026-05-22T06:15:48Z","run_id":"commit-msg-20260522T061548Z-meta1","node":"commit-msg","round":1,"type":"ralph_iter_end","done":true,"reason":"judge_score=1.0"}

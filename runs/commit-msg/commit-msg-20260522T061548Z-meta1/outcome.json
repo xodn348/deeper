@@ -1,0 +1,9 @@
+{
+  "run_id": "commit-msg-20260522T061548Z-meta1",
+  "node": "commit-msg",
+  "status": "passed",
+  "rounds": 1,
+  "final_score": 1.0,
+  "exit_reason": "judge_score=1.0 >= 0.9",
+  "violations_total": {}
+}

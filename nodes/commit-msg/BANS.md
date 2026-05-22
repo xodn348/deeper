@@ -1,0 +1,4 @@
+- `length` — promoted from 2 of last 5 runs (example: commit-msg-20260522T061506Z-meta2)
+- `no-conv-format` — promoted from 2 of last 5 runs (example: commit-msg-20260522T061506Z-meta2)
+- `trailing-period` — promoted from 2 of last 5 runs (example: commit-msg-20260522T061506Z-meta2)
+- `verb-tense` — promoted from 2 of last 5 runs (example: commit-msg-20260522T061509Z-meta4)

@@ -1,0 +1,9 @@
+{
+  "run_id": "commit-msg-20260522T061507Z-meta3",
+  "node": "commit-msg",
+  "status": "hard_cap",
+  "rounds": 3,
+  "final_score": 0.75,
+  "exit_reason": "reached hard cap of 3 rounds",
+  "violations_total": {"verb-tense": 3}
+}
