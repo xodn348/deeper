@@ -60,7 +60,36 @@ ACTIVE CLAIM to drill: "{active_claim}"
 Output exactly ONE line: the depth question. The orchestrator will show it to the user verbatim.
 ```
 
-Capture the subagent's output. Strip any accidental preamble (e.g. "Sure! Here's the question:") — keep only the question itself.
+Capture the subagent's output. Save the **raw, unstripped** output to a temp file for the judge to inspect, then strip any accidental preamble (e.g. "Sure! Here's the question:") — keep only the question itself for the user-facing message.
+
+```bash
+RAW_FILE="$RUN_DIR/.q-raw-${N}.txt"
+# Write the subagent's verbatim output to RAW_FILE via your Write tool.
+# Then determine $subagent_question = last non-empty line of RAW_FILE.
+```
+
+Emit a `question_emitted` event so the judge can inspect question quality (this closes the self-improvement loop for question-shape lessons, not just tree-shape lessons):
+
+```bash
+python3 - "$RUN_DIR" {N} "$RAW_FILE" <<'PY' >> "$RUN_DIR/events.jsonl"
+import json, sys, time, pathlib
+run_dir, rnd, raw_file = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+raw = pathlib.Path(raw_file).read_text()
+lines = [l for l in raw.splitlines() if l.strip()]
+question = lines[-1] if lines else ""
+event = {
+    "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "run_id": pathlib.Path(run_dir).name,
+    "node": "deeper",
+    "round": rnd,
+    "type": "question_emitted",
+    "question": question,
+    "raw_chars": len(raw),
+    "raw_lines": len(lines),
+}
+print(json.dumps(event, separators=(",", ":")))
+PY
+```
 
 ### Step 3 — Present the question to the user
 
