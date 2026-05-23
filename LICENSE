@@ -19,17 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-This project synthesizes patterns from four upstream open-source projects. See
-`docs/ATTRIBUTION.md` for full per-source license posture. Summary:
-
-- superpowers (Jesse Vincent) — MIT
-- oh-my-codex / omx — MIT
-- ouroboros (Q00) — MIT
-- oh-my-openagent (code-yeongyu) — Sustainable Use License v1.0; ideas only,
-  no verbatim text borrowed.
-
-All MIT-licensed patterns in this repo are derived works under the MIT terms.
-The MIT license above governs `deeper` itself.
