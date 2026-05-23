@@ -100,13 +100,13 @@ ln -s ~/code/deeper/skills/deeper ~/.claude/skills/deeper
 Two modes:
 
 ```
-/deeper why does X keep happening?            # interactive — user answers each round
-/deeper auto why does X keep happening?       # autonomous — A-subagent answers, orchestrator loops
+/deeper why does X keep happening?              # default — worktree-isolated auto drill
+/deeper interactive why does X keep happening?  # legacy — human answers each round in chat
 ```
 
-**Interactive** (default): a fresh Q-subagent generates each depth question; you reply in chat with free text / `BEDROCK:<cat>` / `BRANCH:<sibling>` / `STOP`.
+**Default (worktree auto)**: the main session is a thin launcher. It sets up `runs/deeper/<run-id>/`, then dispatches ONE Agent call with `isolation: "worktree"` and `subagent_type: "general-purpose"`. That orchestrator subagent runs the entire drill inside an isolated worktree — spawning fresh Q-subagents and A-subagents per round (Agent tool + `Explore`), feeding answers to `model.py`, running `judge.sh`, looping until done or `DEEPER_AUTO_CAP` (default 8). When it returns, the main session surfaces the final dispatch tree + tree render + outcome.json. The main session never sees the claim content and never falls back to answering. Round 1 cannot "end the session" because there is no per-round turn boundary in the main session — the whole drill is one Agent dispatch.
 
-**Auto**: same Q-subagent, but a second A-subagent stands in for the human respondent and writes the answer. The orchestrator loops until done or `DEEPER_AUTO_CAP` (default 8 rounds). After each round it prints the cumulative dispatch tree via `nodes/deeper/render-dispatch.sh` so you watch the drill grow live. Useful for testing the harness, sanity-checking BANS evolution, or generating a candidate drill to edit later — not a replacement for interactive when the user is the source of truth.
+**Interactive (legacy)**: the main session is the orchestrator, dispatching a fresh Q-subagent each round, asking you in chat, ending its turn to await your reply. Use when the user is the source of truth and the system needs your answers to walk the tree.
 
 State persists in `runs/deeper/<run-id>/tree.json`. Resume with `/deeper resume <run-id>`. Full orchestrator spec in `skills/deeper/SKILL.md`.
 
