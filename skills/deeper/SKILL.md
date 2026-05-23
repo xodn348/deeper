@@ -79,13 +79,23 @@ PER-ROUND LOOP (start N=1):
    active claim and build the ancestor chain (root → … → cursor). On round 1 the
    active claim IS the seed.
 
-2. Dispatch a Q-subagent (Agent tool, subagent_type "Explore"). Prompt:
+2. Dispatch a Q-subagent (Agent tool, subagent_type "Explore", **model: "haiku"** —
+   one-line emission is format-bound, judgment not required; escalate to "sonnet" only
+   if BANS.md flags repeated G-violations for haiku on this claim type, or to "opus"
+   for genuinely cryptic abstract claims). Prompt:
 
    You are deeper-round-{N}. Output exactly ONE depth question — no preamble,
    no "Question:", nothing else.
 
    ROLE: read <DEEPER_ROOT>/nodes/deeper/PROMPT.md in full and follow it.
    BINDING LESSONS: read <DEEPER_ROOT>/nodes/deeper/BANS.md in full.
+
+   HARD GUARDS (binary self-check before you emit — see PROMPT.md "HARD GUARDS" for
+   full text): G1 one non-empty line · G2 no forbidden first tokens (Sure/Here/먼저/이/
+   질문/etc) · G3 language matches ACTIVE CLAIM (Hangul claim → Hangul question) ·
+   G4 exactly one "?", no conjunction joiners (그리고/~고/and/;) · G5 not a restatement
+   of the claim · G6 stay on the active claim, no thread-switch frames. If your draft
+   fails any guard, REWRITE before emitting.
 
    ANCESTOR CHAIN:
    {numbered chain — one line per ancestor, format: "N. <claim>"}
@@ -98,13 +108,33 @@ PER-ROUND LOOP (start N=1):
    question_emitted event to `$RUN_DIR/events.jsonl` with question (last non-empty
    line), raw_chars, raw_lines.
 
-3. Dispatch an A-subagent (Agent tool, subagent_type "Explore"). Prompt:
+3. Dispatch an A-subagent (Agent tool, subagent_type "Explore", **model: "sonnet"**
+   — judgment-bound: must decide free-text vs BEDROCK vs BRANCH and pick the right
+   axiom category. Escalate to "opus" when the claim is genuinely deep / multi-step
+   reasoning is needed; downshift to "haiku" only for trivially shallow seeds). Prompt:
 
    You are deeper-answer-{N}. The interview is autonomous — you stand in for the
    human respondent.
 
    ROLE: read <DEEPER_ROOT>/nodes/deeper/PROMPT.md (you are answering, but the
    same depth discipline applies — be concrete, specific, honest about uncertainty).
+
+   HARD GUARDS for your answer (binary self-check before emit):
+   - A1: Your response is EXACTLY ONE of: (a) 1–3 sentence free-text answer
+         (NO BEDROCK:/BRANCH: prefix), (b) a single line starting `BEDROCK:`,
+         (c) a single line starting `BRANCH:`. Mixed forms = fail.
+   - A2: Forbidden first tokens: `Sure`, `Here`, `OK`, `Answer`, `A:`, `먼저`,
+         `우선`, `답`, `답변`, `이`. First token = first substantive word, or
+         the literal `BEDROCK:` / `BRANCH:` prefix.
+   - A3: Language match — Hangul in ACTIVE CLAIM → Hangul in your answer.
+   - A4: If you emit `BEDROCK:<cat>`, <cat> MUST be EXACTLY one of:
+         stated-value | constraint | prior-decision | external-rule | identity | empirical.
+         Misspelling, synonym, or made-up category = fail.
+   - A5: Honest uncertainty — if you don't know a fact, say "I don't know X"
+         concretely. No hedge-filler ("perhaps", "maybe", "it could be") used to
+         dodge committing.
+
+   If your draft fails any guard, REWRITE before emitting.
 
    ANCESTOR CHAIN:
    {numbered chain}
@@ -193,7 +223,7 @@ cat "$RUN_DIR/tree.json" 2>/dev/null
 
 If tree.json does not exist (first round), the active claim IS the seed. Otherwise, walk `tree.cursor` from root and read that node's `claim` field as the active claim. Build the ancestor chain by walking from root to cursor.
 
-### Step 2 — Dispatch the subagent (Agent tool, subagent_type "Explore")
+### Step 2 — Dispatch the subagent (Agent tool, subagent_type "Explore", **model: "haiku"** — Opus allowed for cryptic abstract claims)
 
 Send this prompt verbatim, with the placeholders substituted:
 
@@ -202,6 +232,13 @@ You are deeper-round-{N}. Output exactly ONE depth question — no preamble, no 
 
 ROLE: read <DEEPER_ROOT>/nodes/deeper/PROMPT.md in full and follow it.
 BINDING LESSONS: read <DEEPER_ROOT>/nodes/deeper/BANS.md in full (may be empty — that's fine).
+
+HARD GUARDS (binary self-check before you emit — see PROMPT.md "HARD GUARDS" for full text):
+G1 one non-empty line · G2 no forbidden first tokens (Sure/Here/먼저/이/질문/etc) ·
+G3 language matches ACTIVE CLAIM (Hangul claim → Hangul question) ·
+G4 exactly one "?", no conjunction joiners (그리고/~고/and/;) ·
+G5 not a restatement of the claim · G6 stay on the active claim, no thread-switch frames.
+If your draft fails any guard, REWRITE before emitting.
 
 ANCESTOR CHAIN (the drill path so far — do NOT consider siblings or closed branches):
 {numbered chain — one line per ancestor, format: "N. [from-user] <claim>"}
