@@ -1,0 +1,26 @@
+# Per-run artifacts. Smoke evidence already tracked stays; new local runs are ignored.
+# (Git ignores untracked paths only; already-tracked smoke runs are unaffected.)
+runs/**/*
+!runs/commit-msg/
+!runs/commit-msg/**
+!runs/deeper/
+!runs/deeper/smoke-chain/
+!runs/deeper/smoke-chain/**
+!runs/deeper/smoke-branch/
+!runs/deeper/smoke-branch/**
+!runs/deeper/harness-smoke/
+!runs/deeper/harness-smoke/**
+
+# Harness scratch
+**/.prompt-*.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
