@@ -1,64 +1,50 @@
 # deeper
 
-Originally: a depth-first interview agent that drives one claim to bedrock without expanding the discussion.
+A self-improving [ralph loop](https://ghuntley.com/ralph/) framework. One harness, pluggable nodes, lessons that compound across runs.
 
-As of this commit: also the substrate for a self-improving agent harness built on Huntley's ralph loop. `deeper` is now **one node** in a general `ralph → feedback → ralph → feedback` system. The interview is the marquee node; the harness underneath is the load-bearing infrastructure.
+The marquee node is **deeper** itself — a depth-first interview that drills ONE claim to its bedrock (first principle / axiom / source of truth), exposed as a Claude Code slash command. Every existing interview skill (`superpowers:brainstorming`, `omx:deep-interview`, `pegasus-init`, `gstack:office-hours`, `ouroboros`) is built to *keep breadth* and fight tunneling. `deeper` does the opposite — it commits to one claim and refuses to widen until that claim reaches bedrock. The reference verification node, `commit-msg`, runs autonomously against a deterministic mock so the self-improvement loop is testable for free.
 
-## Two layers
+## The framework — ralph + structured feedback
 
-### Layer 1 — self-improving harness (built, verified end-to-end)
+A ralph loop re-injects the same prompt every iteration with fresh context. This repo wraps that with a feedback step that reads structured logs and promotes recurring rule violations to a binding-lessons file. Next run starts smarter without anyone editing the prompt by hand.
+
+```
+run N:    walk task   →  judge logs violations  →  feedback.sh aggregates
+                                                          ↓
+                                              promotes to BANS.md if recurring
+                                                          ↓
+run N+1:  model reads new BANS  →  behavior changes  →  better outcome
+```
 
 ```
 harness/
 ├── loop.sh          # one ralph run: read PROMPT+BANS+state → call $MODEL_CMD → judge → repeat until done or cap
 ├── feedback.sh      # read N recent runs' events.jsonl → promote repeated violations to BANS.md
 ├── meta-loop.sh     # run M ralph runs, calling feedback after each
-└── lib/mock-model.sh   # deterministic state-machine fake, for free demos
-node-contract.md     # what every node must provide
-nodes/<name>/        # node-specific: PROMPT.md, BANS.md, judge.sh, hard-cap.txt
+└── lib/mock-model.sh   # deterministic state-machine fake — for $0 verification
+
+node-contract.md     # what every node must provide: PROMPT.md, BANS.md, judge.sh, hard-cap.txt
+nodes/<name>/        # node-specific files
 runs/<name>/<id>/    # per-run artifacts: seed.md, state.md, events.jsonl, outcome.json
 ```
 
-The harness is task-agnostic. It uses no node-specific code. Plug in a node by satisfying `node-contract.md`.
+The harness is task-agnostic. It has no node-specific code. Plug in a node by satisfying `node-contract.md`. The model is whatever you put in `$MODEL_CMD` — `claude -p`, `gemini`, `codex exec`, a deterministic mock for tests, or (for the `deeper` node) a Claude Code orchestrator that dispatches a fresh subagent every round.
 
-**Verified.** The `commit-msg` reference node starts at score 0.25 (3 hard-cap runs producing the wrong-format, wrong-length, period-trailing output) and converges to score 1.0 in 1 round after 4 lessons accumulate in `BANS.md`. Trajectory recorded in `runs/commit-msg/` and summarized in `spec/tasks/004-self-improving-harness.md`.
+**Verified.** The `commit-msg` reference node starts at score 0.25 (3 hard-cap runs producing wrong-format, wrong-length, period-trailing output) and converges to score 1.0 in 1 round after 4 lessons accumulate in `BANS.md`. Trajectory recorded in `runs/commit-msg/`, summarized in `spec/tasks/004-self-improving-harness.md`.
 
-### Layer 2 — deeper, the depth-first interview node (v1 built, mechanical)
+## The marquee node — `/deeper`
 
-```
-nodes/deeper/
-├── PROMPT.md           # node intent + v1/v2 split
-├── model.py            # iteration-tree driver: walks cursor, prompts user, mutates tree.json
-├── judge.sh            # done = no open leaves; flags shallow-bedrock
-├── render.sh           # tree.json → human-readable markdown view
-├── sample-seed.md      # starter claim
-├── BANS.md             # empty in v1 (v2 LLM will read this)
-└── hard-cap.txt        # 20
+A Claude Code slash command. Per round, a **fresh subagent** generates one targeted depth question from:
 
-skills/deeper/SKILL.md  # the original hand-runnable Claude Code skill (preserved as reference design)
-docs/ATTRIBUTION.md     # per-source IP posture (superpowers / omx / ouroboros MIT; omo ideas-only)
-```
+- the node prompt (`nodes/deeper/PROMPT.md` — pressure ladder + Ontologist 4Q)
+- the binding lessons (`nodes/deeper/BANS.md` — accumulated "don't do this again" rules)
+- the **ancestor chain only** (root → … → active claim — never siblings, never the whole tree)
 
-**State** = `runs/deeper/<id>/tree.json` — a JSON tree of claims. One cursor (DFS-deepest open leaf) is active per ralph iteration. `BEDROCK:<category>` closes a branch and pops to the next open leaf. `BRANCH:<sibling>` opens a parallel branch. Verified end-to-end in `runs/deeper/{smoke-chain,smoke-branch,harness-smoke}/`.
+You answer. The state mutates. Next round dispatches a new subagent with fresh context. The orchestrator (the main Claude session) does pure I/O + dispatch — it never reasons about your claim.
 
-**v1 limitation**: no LLM. The model is a mechanical Python script that asks "Why X?" and captures the user's free-text answer. v2 adds an LLM that generates targeted depth-questions from PROMPT.md + BANS.md + the cursor's ancestor chain.
+**Why per-round fresh subagent.** In a single long Claude session, context grows across rounds and the model starts rationalizing its own prior reasoning — the exact drift Huntley's ralph fixes. Per-round dispatch keeps each question generation **cold**: only PROMPT.md + BANS.md + the ancestor chain enter the subagent's context. The orchestrator stays pure I/O. This is the only known way to hold depth-first discipline across many rounds without drift.
 
-## Mechanism — how a drill grows the tree
-
-One drill = many rounds. Per round:
-
-1. Read `tree.json`, find `cursor`.
-2. Build the **ancestor chain** (root → … → cursor). NOT the whole tree.
-3. Dispatch a fresh subagent with `PROMPT.md` + `BANS.md` + ancestor chain.
-4. Subagent emits ONE depth question (pressure ladder / Ontologist 4Q).
-5. User answers — free text `|` `BEDROCK:<cat>` `|` `BRANCH:<sibling>` `|` `STOP`.
-6. Mutate `tree.json` by one of three rules:
-   - **normal** → append child, cursor descends (deeper)
-   - **BEDROCK** → close current, cursor pops to next open leaf (DFS-deepest)
-   - **BRANCH** → append sibling under parent, cursor jumps (parallel cause)
-7. Run `judge.sh`, append events. Done when `cursor=null` AND every leaf closed.
-
-A finished tree, 5 rounds, one branch opened:
+## Mechanism — one drill, many rounds
 
 ```
 ●  "Why does X?"
@@ -69,36 +55,30 @@ A finished tree, 5 rounds, one branch opened:
         └── ◆ [BEDROCK: stated-value]
 ```
 
-**Why a fresh subagent every round, not one long session.** Without it, the orchestrator's context grows across rounds and starts rationalizing its own earlier reasoning — the exact drift ralph was built to avoid. Per-round dispatch keeps each question generation cold: only `PROMPT.md` + `BANS.md` + the current ancestor chain enter the subagent's context. The main session is pure I/O + dispatch, never reasoning about the claim.
+Per round:
 
-## How BANS.md shapes paths (and how self-improvement closes the loop)
+1. Read `tree.json`, find `cursor` (DFS-deepest open leaf).
+2. Build the **ancestor chain** — root → … → cursor. NOT the whole tree, NOT siblings.
+3. Dispatch fresh subagent with `PROMPT.md` + `BANS.md` + ancestor chain.
+4. Subagent emits ONE depth question (pressure ladder / Ontologist 4Q).
+5. User answers — free text `|` `BEDROCK:<cat>` `|` `BRANCH:<sibling>` `|` `STOP`.
+6. Mutate `tree.json`:
+   - **normal** → append child, cursor descends (deeper)
+   - **BEDROCK** → close current leaf, cursor pops to next open leaf
+   - **BRANCH** → append sibling under parent, cursor jumps (parallel cause)
+7. Run `judge.sh`, append events. Done when `cursor=null` AND every leaf closed.
 
-BANS does **not** walk the tree directly — user answers + cursor rules do. BANS shapes the *questions* the subagent generates, which shapes the answers, which shapes the path. Indirect bias, not direct forcing, but compounding across runs:
+## How BANS.md shapes paths
 
-```
-run N:    walk tree   →  judge logs violations  →  feedback.sh aggregates
-                                                          ↓
-                                              promotes to BANS.md if recurring
-                                                          ↓
-run N+1:  subagent reads new BANS  →  generates different questions
-                                                          ↓
-                                              user answers shift in shape
-                                                          ↓
-                                              new walking path emerges
-```
+BANS does **not** walk the tree directly — user answers + cursor rules do. BANS shapes the *questions* the subagent generates, which shapes the answers, which shapes the path. Indirect bias, compounding across runs.
 
-Example: a `shallow-bedrock` violation (user declared bedrock at depth < 2) fires once in run 3 and once in run 5 → `feedback.sh` promotes it → run 6's subagent reads BANS and probes deeper before letting any bedrock candidate through → run 6's tree tends to close at depth 3+ instead of depth 1.
+Example: a `shallow-bedrock` violation (bedrock declared at depth < 2) fires in run 3 and run 5 → `feedback.sh` promotes it → run 6's subagent reads BANS and probes deeper before letting any bedrock candidate through → run 6's trees tend to close at depth 3+.
 
-The agent self-improves by **path bias**, not path forcing. Each run's path is still user-driven; the *quality distribution* of paths drifts toward less-shallow, less-repeated-failure-mode shapes.
-
-## Why this exists
-
-1. **Depth-first interviewing is missing.** Every existing interview skill (`superpowers:brainstorming`, `omx:deep-interview`, `pegasus-init`, `gstack:office-hours`, `ouroboros`) explicitly fights tunneling. We need the opposite for root-cause work. → Layer 2.
-2. **Skills written into long markdown drift as conversations accumulate.** Huntley's ralph fixes this by re-injecting the same prompt every iteration with fresh context. Combining ralph with a feedback loop over structured logs gives you a system that genuinely improves run-over-run without anyone editing the prompt by hand. → Layer 1.
+Path *bias*, not path *forcing*. Each run is still user-driven; the *quality distribution* of paths drifts toward less-shallow shapes.
 
 ## Quick demos
 
-### Self-improvement loop (autonomous, no LLM cost)
+### Self-improvement loop, autonomous, $0
 
 ```bash
 cd ~/code/deeper
@@ -106,7 +86,7 @@ MODEL_CMD="bash harness/lib/mock-model.sh" \
   bash harness/meta-loop.sh commit-msg nodes/commit-msg/sample-seed.md 6 1
 ```
 
-Watch BANS.md fill up and the run score climb from 0.25 to 1.0.
+Watch `nodes/commit-msg/BANS.md` fill up and the run score climb from 0.25 to 1.0. The mock is a deterministic state machine — no LLM, no tokens. This is how the framework's self-improvement claim is verified.
 
 ### Depth-first interview — Claude Code skill (recommended)
 
@@ -125,25 +105,53 @@ Use:
 
 The skill orchestrates a per-round dispatch loop: a fresh subagent generates each depth question using the pressure ladder / Ontologist 4Q; you reply in chat with free text / `BEDROCK:<cat>` / `BRANCH:<sibling>` / `STOP`. State persists in `runs/deeper/<run-id>/tree.json`. Resume with `/deeper resume <run-id>`. Full orchestrator spec in `skills/deeper/SKILL.md`.
 
+After a drill, the skill suggests running `bash harness/feedback.sh deeper` to roll the run's violations into BANS — closing the self-improvement loop.
+
 ### Depth-first interview — bash CLI (no Claude Code)
 
 ```bash
 cd ~/code/deeper
 MODEL_CMD="python3 nodes/deeper/model.py" \
   bash harness/loop.sh deeper nodes/deeper/sample-seed.md my-first-drill
-# Answer each prompt; BEDROCK:<category> for axiom, BRANCH:<sibling> for parallel cause, STOP to abort.
 bash nodes/deeper/render.sh runs/deeper/my-first-drill   # view the tree
 ```
 
-The bash version uses `model.py`'s mechanical "Why X?" prompt — no LLM. The skill above adds the LLM question-generation layer on top of the same state files. Fully compatible.
+This mode uses `model.py`'s mechanical "Why X?" prompt — no LLM, no targeted pressure-ladder questions. Same `tree.json` state files as the skill, so you can start in bash and resume in `/deeper`. Useful for offline, scripted, or smoke-test runs.
 
-### Swap to real Claude (commit-msg, autonomous)
+### Swap to real Claude on `commit-msg`
 
 ```bash
 MODEL_CMD="claude -p" bash harness/meta-loop.sh commit-msg nodes/commit-msg/sample-seed.md 3 1
 ```
 
 Anything that reads a prompt on stdin and writes the response on stdout works — `gemini`, `codex exec`, etc.
+
+## Repo layout
+
+```
+harness/                    # task-agnostic ralph + feedback loop (above)
+node-contract.md            # what every node must provide
+
+nodes/
+├── deeper/                 # marquee node: depth-first interview
+│   ├── PROMPT.md           # role + pressure ladder + Ontologist 4Q
+│   ├── BANS.md             # accumulated lessons (read by subagent every round)
+│   ├── model.py            # iteration-tree driver: mutates tree.json after each user reply
+│   ├── judge.sh            # done = no open leaves; flags shallow-bedrock
+│   ├── render.sh           # tree.json → human-readable view
+│   ├── sample-seed.md
+│   └── hard-cap.txt        # 20
+└── commit-msg/             # reference verification node (autonomous, mock-driven)
+
+skills/deeper/SKILL.md      # Claude Code orchestrator for the deeper node
+runs/<node>/<run-id>/       # per-run state: seed.md, tree.json, state.md, events.jsonl, outcome.json
+docs/ATTRIBUTION.md         # per-source IP posture (superpowers / omx / ouroboros MIT; omo ideas-only)
+```
+
+## Why this exists
+
+1. **Skills written into long markdown drift as conversations accumulate.** Huntley's ralph fixes this by re-injecting the same prompt every iteration with fresh context. Combining ralph with a feedback loop over structured logs gives a system that genuinely improves run-over-run without anyone editing the prompt by hand. → the framework.
+2. **Depth-first interviewing is missing.** Every existing interview skill explicitly fights tunneling. Root-cause work needs the opposite. → the `deeper` node.
 
 ## Status
 
