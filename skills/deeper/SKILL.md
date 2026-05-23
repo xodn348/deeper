@@ -13,9 +13,10 @@ This skill expects the `deeper` repo at `~/code/deeper/`. All paths below resolv
 
 ## On invocation
 
-1. **Determine the seed claim.**
-   - If the user's invocation message includes a claim after `/deeper` (e.g. `/deeper why does X keep failing?`), use the text after the command as the seed.
-   - Otherwise: ask the user `"What single claim do you want to take to bedrock? (one sentence)"` and end your turn.
+1. **Determine the mode and seed claim.**
+   - If the invocation begins with `auto` (e.g. `/deeper auto why does X keep failing?`), set `MODE=auto` and the seed = the rest. In auto mode the orchestrator loops without waiting for the user — both questions AND answers come from subagents. See **## Auto mode** below.
+   - If the invocation begins with `resume <run-id>`, see **## Resumption** below.
+   - Otherwise `MODE=interactive`. If a claim follows `/deeper`, use it as the seed. If nothing follows, ask the user `"What single claim do you want to take to bedrock? (one sentence)"` and end your turn.
 
 2. **Once you have the seed, set up the run:**
    ```bash
@@ -25,8 +26,9 @@ This skill expects the `deeper` repo at `~/code/deeper/`. All paths below resolv
    printf '# Starting claim\n\n%s\n' "<seed-text>" > "$RUN_DIR/seed.md"
    : > "$RUN_DIR/state.md"
    : > "$RUN_DIR/events.jsonl"
+   echo "$MODE" > "$RUN_DIR/.mode"
    ```
-   Tell the user: `Run started: <RUN_ID>. State at <RUN_DIR>. To resume later: /deeper resume <RUN_ID>`.
+   Tell the user: `Run started: <RUN_ID> [mode=<MODE>]. State at <RUN_DIR>. To resume later: /deeper resume <RUN_ID>`.
 
 3. Enter the round loop starting at N=1.
 
@@ -91,7 +93,9 @@ print(json.dumps(event, separators=(",", ":")))
 PY
 ```
 
-### Step 3 — Present the question to the user
+### Step 3 — Present the question to the user (interactive mode only)
+
+**If MODE=auto, skip this step entirely and go to Step 4-auto below.**
 
 End your turn with this message (substitute placeholders):
 
@@ -112,9 +116,55 @@ Reply with:
 
 End your turn. The user's next message IS the answer.
 
-### Step 4 — Apply the user's reply
+### Step 4-auto — Dispatch an answer subagent (auto mode only)
 
-The next user message is the verbatim answer. Write it to a file (avoids shell-quoting issues with newlines, quotes, special chars), then invoke `model.py`:
+In auto mode, do NOT end your turn. Dispatch a fresh `Explore` subagent to answer on behalf of a hypothetical respondent:
+
+```
+You are deeper-answer-{N}. The interview is in autonomous mode — you stand in for the human respondent.
+
+ROLE: read $HOME/code/deeper/nodes/deeper/PROMPT.md in full (you are answering, not asking, but the same depth discipline applies — be concrete, specific, honest about uncertainty).
+
+ANCESTOR CHAIN (the drill path so far):
+{numbered chain — one line per ancestor}
+
+ACTIVE CLAIM being drilled: "{active_claim}"
+
+QUESTION TO ANSWER: "{subagent_question}"
+
+Output exactly ONE response — one of:
+  (a) free-text answer (1–3 sentences) that drills deeper into the claim. Concrete, specific.
+  (b) "BEDROCK:<category>" if this active claim IS an axiom. Categories: stated-value | constraint | prior-decision | external-rule | identity | empirical.
+  (c) "BRANCH:<sibling claim>" if a parallel cause under the same parent is worth opening.
+
+No preamble. No "Answer:". No reasoning about which option you picked. The orchestrator passes your output verbatim to model.py.
+```
+
+Capture the answer. Save the **raw** output to `$RUN_DIR/.a-raw-${N}.txt` and emit an `answer_emitted` event so the answer is fully traceable:
+
+```bash
+python3 - "$RUN_DIR" {N} "$RUN_DIR/.a-raw-${N}.txt" <<'PY' >> "$RUN_DIR/events.jsonl"
+import json, sys, time, pathlib
+run_dir, rnd, raw_file = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+raw = pathlib.Path(raw_file).read_text()
+event = {
+    "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "run_id": pathlib.Path(run_dir).name,
+    "node": "deeper",
+    "round": rnd,
+    "type": "answer_emitted",
+    "answer": raw.strip(),
+    "source": "subagent",
+}
+print(json.dumps(event, separators=(",", ":")))
+PY
+```
+
+The answer file becomes the ANSWER_FILE for Step 4 below. Proceed to Step 4 directly — no user reply needed.
+
+### Step 4 — Apply the reply
+
+The user's next message (interactive) OR the subagent's answer (auto) is the verbatim reply. Write it to a file (avoids shell-quoting issues with newlines, quotes, special chars), then invoke `model.py`:
 
 ```bash
 ANSWER_FILE="$RUN_DIR/.answer-${N}.txt"
@@ -143,7 +193,17 @@ bash ~/code/deeper/nodes/deeper/judge.sh "$RUN_DIR" {N}
 
 The judge appends one `judge_result` event to `events.jsonl`.
 
-### Step 6 — Check done
+### Step 6 — Render the dispatch chain (visual progress)
+
+After every round, render the cumulative subagent dispatch tree so the user sees the drill grow live:
+
+```bash
+bash ~/code/deeper/nodes/deeper/render-dispatch.sh "$RUN_DIR"
+```
+
+In auto mode print the output between rounds (the user is watching one long turn). In interactive mode you can skip this — the user replied so they know what's happening.
+
+### Step 7 — Check done
 
 ```bash
 tail -1 "$RUN_DIR/events.jsonl" | python3 -c 'import json,sys; e=json.loads(sys.stdin.read()); print(e.get("detail",{}).get("done"))'
@@ -151,6 +211,8 @@ tail -1 "$RUN_DIR/events.jsonl" | python3 -c 'import json,sys; e=json.loads(sys.
 
 - If `True` OR the user replied with `STOP` OR `model.py` printed `BLOCKED:`: go to **On exit**.
 - Else: increment N and loop to **Step 1**.
+
+In auto mode, also exit if N reaches the auto-mode cap (default: 8 rounds — keeps token spend bounded). Override with `DEEPER_AUTO_CAP=<n>` env var. The interactive hard cap stays at 20.
 
 ## On exit
 
@@ -181,7 +243,7 @@ tail -1 "$RUN_DIR/events.jsonl" | python3 -c 'import json,sys; e=json.loads(sys.
    PY
    ```
 
-   `STATUS` is `passed` (cursor=null + all closed), `aborted` (user STOP or BLOCKED), or `hard_cap` (>20 rounds).
+   `STATUS` is `passed` (cursor=null + all closed), `aborted` (user STOP or BLOCKED), `hard_cap` (interactive, >20 rounds), or `auto_cap` (auto, ≥DEEPER_AUTO_CAP rounds).
 
 3. Suggest to the user: `Run \`bash ~/code/deeper/harness/feedback.sh deeper\` to update BANS.md based on this and recent runs — this is how the system self-improves.`
 
@@ -196,23 +258,64 @@ If invoked as `/deeper resume <run-id>`:
 
 ## Hard cap
 
-If N reaches 20 without an exit, present the user three options (use AskUserQuestion):
+**Interactive mode**: if N reaches 20 without an exit, present the user three options (use AskUserQuestion):
 - **Continue** — relax the cap, keep drilling
 - **Accept current as provisional bedrock** — close active leaf with category `stated-value` (note: user-provisional, not user-asserted)
 - **Abort with partial trace** — write outcome.json with status=hard_cap
+
+**Auto mode**: if N reaches `DEEPER_AUTO_CAP` (default 8) without an exit, write outcome.json with status=auto_cap, render the dispatch chain, and exit. Do not bother the user — they can resume manually with `/deeper resume <run-id>` if they want to drill further.
+
+## Auto mode — what changes
+
+`/deeper auto <claim>` runs without a human respondent. The flow per round becomes:
+
+```
+Q-subagent (Explore) → emits question  → events.jsonl: question_emitted
+A-subagent (Explore) → emits answer    → events.jsonl: answer_emitted
+model.py             → mutates tree.json
+judge.sh             → events.jsonl: judge_result
+render-dispatch.sh   → prints the cumulative chain to the user
+loop until done or DEEPER_AUTO_CAP reached
+```
+
+The orchestrator does NOT end its turn between rounds. The user sees one long turn that grows the dispatch tree live. Each round = 2 subagent calls (Q + A), so token spend scales linearly with rounds.
+
+**When to use auto**: testing the harness, sanity-checking BANS evolution, generating a candidate drill the user can later edit/extend, or watching the system reason through a claim without manual answering. **Not** a replacement for interactive mode when the user is the source of truth — auto answers are model fabrications grounded only in the ancestor chain.
+
+**Visualization**: `render-dispatch.sh` prints an ASCII tree like:
+
+```
+deeper run: deeper-20260523T050000Z  [mode=auto]
+seed: 너 자기자신을 계속 발전시킬 방법은?
+
+├─ R1
+│    [Q] Explore subagent
+│        → 구체적인 자기 개선 사례 하나를 들어달라
+│    [A] Explore subagent
+│        → BANS.md 자동 promotion 메커니즘 (feedback.sh가 위반 N회 누적시 승격)
+│    [judge] score=0 depth=1 cursor=path violations=
+│
+└─ R2
+     [Q] Explore subagent
+         → 그 promotion이 실제로 다음 run의 행동을 바꾸는가?
+     [A] Explore subagent
+         → BEDROCK: empirical
+     [judge] score=1.0 depth=1 cursor=None
+```
 
 ## RED FLAGS — refuse these in YOURSELF
 
 | Thought | Reality |
 |---|---|
 | "Let me analyze the claim while waiting for the user" | NO. Orchestrator never reasons about content. |
-| "I'll skip the subagent this round — too slow" | NO. Subagent every round. Fresh context IS the point. |
-| "I'll suggest some bedrock candidates" | NO. Only the user declares bedrock. |
-| "Let me summarize / paraphrase the user's answer" | NO. Pass verbatim to model.py via the answer file. |
-| "The user seems tired, let me wrap up" | Only if they STOP. Otherwise keep drilling. |
+| "I'll skip the subagent this round — too slow" | NO. Subagent every round (Q in both modes; Q+A in auto). Fresh context IS the point. |
+| "I'll suggest some bedrock candidates" | NO. Bedrock comes from the respondent (user in interactive, A-subagent in auto). Never from the orchestrator. |
+| "Let me summarize / paraphrase the answer" | NO. Pass verbatim to model.py via the answer file. |
+| "The user seems tired, let me wrap up" | Only if they STOP. Otherwise keep drilling. (Auto mode: stop only at done / BLOCKED / auto cap.) |
 | "Let me read the whole tree for context" | NO. Subagent gets ancestor chain only. |
 | "I'll ask 2 questions in one round" | NO. ONE question per round, always. |
-| "Let me improve the subagent's question before showing it" | NO. Show it verbatim. If it's bad, that's a BANS lesson, not a fix-on-the-fly. |
+| "Let me improve the subagent's question or answer before showing it" | NO. Show it verbatim. If it's bad, that's a BANS lesson, not a fix-on-the-fly. |
+| "Auto mode means I can also write the answer myself" | NO. Auto = A-subagent writes the answer. Orchestrator only dispatches. |
 
 ## Why per-round subagent dispatch
 

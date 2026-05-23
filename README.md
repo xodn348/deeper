@@ -97,13 +97,18 @@ mkdir -p ~/.claude/skills
 ln -s ~/code/deeper/skills/deeper ~/.claude/skills/deeper
 ```
 
-Use:
+Two modes:
 
 ```
-/deeper why does X keep happening?
+/deeper why does X keep happening?            # interactive — user answers each round
+/deeper auto why does X keep happening?       # autonomous — A-subagent answers, orchestrator loops
 ```
 
-The skill orchestrates a per-round dispatch loop: a fresh subagent generates each depth question using the pressure ladder / Ontologist 4Q; you reply in chat with free text / `BEDROCK:<cat>` / `BRANCH:<sibling>` / `STOP`. State persists in `runs/deeper/<run-id>/tree.json`. Resume with `/deeper resume <run-id>`. Full orchestrator spec in `skills/deeper/SKILL.md`.
+**Interactive** (default): a fresh Q-subagent generates each depth question; you reply in chat with free text / `BEDROCK:<cat>` / `BRANCH:<sibling>` / `STOP`.
+
+**Auto**: same Q-subagent, but a second A-subagent stands in for the human respondent and writes the answer. The orchestrator loops until done or `DEEPER_AUTO_CAP` (default 8 rounds). After each round it prints the cumulative dispatch tree via `nodes/deeper/render-dispatch.sh` so you watch the drill grow live. Useful for testing the harness, sanity-checking BANS evolution, or generating a candidate drill to edit later — not a replacement for interactive when the user is the source of truth.
+
+State persists in `runs/deeper/<run-id>/tree.json`. Resume with `/deeper resume <run-id>`. Full orchestrator spec in `skills/deeper/SKILL.md`.
 
 After a drill, the skill suggests running `bash harness/feedback.sh deeper` to roll the run's violations into BANS — closing the self-improvement loop.
 
