@@ -13,11 +13,16 @@ This skill expects the `deeper` repo at `~/code/deeper/`. All paths below resolv
 
 ## On invocation
 
+**UI discipline (main-session launcher only)**: when the launcher needs the user to choose between options, ALWAYS use the `AskUserQuestion` tool — never a plain text prompt embedded in your message. The structured UI makes it visually unambiguous that the question is coming from the main session, not from whatever the worktree orchestrator is doing. Plain text is fine only for free-form input (e.g. seed claim entry) where no discrete options exist.
+
 1. **Determine the mode and seed claim.**
    - **Default — worktree auto.** If the invocation is `/deeper <claim>` or `/deeper auto <claim>`, set `MODE=auto` and seed = the claim text. The entire drill runs in a worktree-isolated orchestrator subagent; the main session sees only the final dispatch tree.
    - **Explicit interactive.** If the invocation begins with `interactive` (e.g. `/deeper interactive <claim>`), set `MODE=interactive` and run the per-round loop in the main session, ending the turn after each question to await the user's reply. This is the legacy human-in-loop path.
    - **Resume.** If the invocation begins with `resume <run-id>`, see **## Resumption** below.
-   - If no claim is supplied for auto or interactive modes, ask the user `"What single claim do you want to take to bedrock? (one sentence)"` and end your turn.
+   - **Ambiguous invocation** (no claim, or just `/deeper` with no arg): call `AskUserQuestion` to pick the mode (single-select):
+     - **Auto (recommended)** — worktree-isolated, hands-off, ~8 rounds
+     - **Interactive** — human-in-loop, you answer each round in chat
+     Then end your turn. On the user's reply, ask for the seed claim as plain text (free-form, no fixed options).
 
 2. **Once you have the seed, set up the run state in the main repo (not in any worktree):**
    ```bash
@@ -148,8 +153,29 @@ RETURN to the launching session: a single text block containing
 Nothing else. No commentary. No analysis of the claim.
 ```
 
-After Agent returns, surface its output to the user verbatim. Then suggest:
-`Run \`bash ~/code/deeper/harness/feedback.sh deeper\` to roll this run's violations into BANS.md — this is how the system self-improves.`
+After Agent returns, surface its output to the user verbatim. Then call `AskUserQuestion` to offer next-step actions — this is the visible signal that control has returned to the main session and the worktree work is done.
+
+Question: `이 drill 이후로 뭘 할까?`
+
+Options depend on the returned STATUS:
+
+- `status=passed` (drill closed all leaves):
+  - **Run feedback.sh** — promote this run's violations to BANS.md
+  - **View tree** — re-render `nodes/deeper/render.sh <RUN_DIR>` in chat
+  - **Done** — nothing more
+
+- `status=auto_cap` (hit the round cap without closing):
+  - **Resume with +8 rounds (Recommended)** — `/deeper resume <RUN_ID>` with `DEEPER_AUTO_CAP` doubled
+  - **Run feedback.sh** — promote partial violations anyway
+  - **Accept partial trace** — leave outcome.json as-is, exit
+  - **Done** — nothing more
+
+- `status=aborted` (BLOCKED — model.py rejected something):
+  - **Inspect events.jsonl** — open the run dir, show the last few events
+  - **Resume** — try again with the next round
+  - **Done** — nothing more
+
+Then execute whatever the user picked. If they pick **Done** or **Other** with no actionable text, end your turn silently. **Never** narrate or "interpret" the drill's outcome — surface the orchestrator's block, surface the UI choices, do what's picked, stop.
 
 That ends the main session's involvement.
 
@@ -315,9 +341,16 @@ tail -1 "$RUN_DIR/events.jsonl" | python3 -c 'import json,sys; e=json.loads(sys.
 If invoked as `/deeper resume <run-id>`:
 - Set `RUN_ID` to the arg, `RUN_DIR=$HOME/code/deeper/runs/deeper/$RUN_ID`.
 - Verify `tree.json` exists; if not, tell the user and abort.
+- Read `.mode` to determine `MODE=auto|interactive`. If missing, default to `auto`.
 - Read `tree.json`, walk `cursor` → that is the active claim for the next round.
 - Determine N: `python3 -c "import json,sys; ls=open('$RUN_DIR/events.jsonl').readlines(); rounds={json.loads(l)['round'] for l in ls if l.strip()}; print(max(rounds)+1 if rounds else 1)"`.
-- Skip to Step 1 of round N.
+- If `MODE=auto`: dispatch the worktree orchestrator with the existing RUN_DIR (the orchestrator's per-round loop already handles resuming via tree.json + events.jsonl).
+- If `MODE=interactive`: skip to Step 1 of round N in the legacy "## Each round" section.
+
+If invoked as `/deeper resume` with NO run-id, call `AskUserQuestion` to pick from recent runs:
+- Title: `이어서 drill할 run을 골라`
+- Options: list the 4 most recent run-ids under `runs/deeper/` (sort by mtime desc), each labeled with the run-id + the seed snippet (first 40 chars of `seed.md`).
+- On selection, treat the chosen run-id as the resume target and continue per above.
 
 ## Hard cap
 
@@ -326,7 +359,7 @@ If invoked as `/deeper resume <run-id>`:
 - **Accept current as provisional bedrock** — close active leaf with category `stated-value` (note: user-provisional, not user-asserted)
 - **Abort with partial trace** — write outcome.json with status=hard_cap
 
-**Auto mode**: if N reaches `DEEPER_AUTO_CAP` (default 8) without an exit, write outcome.json with status=auto_cap, render the dispatch chain, and exit. Do not bother the user — they can resume manually with `/deeper resume <run-id>` if they want to drill further.
+**Auto mode**: if N reaches `DEEPER_AUTO_CAP` (default 8) without an exit, the orchestrator writes outcome.json with status=auto_cap, renders the dispatch chain, and exits the worktree. Control returns to the main session launcher, which then offers next actions via `AskUserQuestion` (see the post-dispatch options block above). The orchestrator never asks the user directly — it only returns its block.
 
 ## RED FLAGS — refuse these in YOURSELF (LAUNCHER)
 
@@ -341,6 +374,8 @@ These apply to the MAIN-SESSION LAUNCHER (you, right now). The orchestrator suba
 | "I'll write the answer because the subagent might say something I disagree with" | NO. The worktree orchestrator handles all Q and A. Main session never produces content. |
 | "Interactive mode is safer, let me default to that" | NO. Default = worktree auto. Interactive only when the user explicitly types `interactive`. |
 | "Let me analyze the user's claim while waiting for the orchestrator" | NO. Wait silently. The orchestrator returns the final block; you surface it. |
+| "I'll just ask the user inline in text — saves a tool call" | NO. Any user choice between options goes through `AskUserQuestion`. The structured UI is the visible separator between main session and worktree. Plain text only for free-form input. |
+| "The orchestrator could ask the user directly mid-drill" | NO. The orchestrator runs in an isolated worktree and never has a turn boundary with the user. It returns one block at the end. All user prompts are launcher-side via `AskUserQuestion`. |
 
 ## Why per-round subagent dispatch
 
