@@ -48,6 +48,16 @@ If you remove the `?` from your question, the remainder must NOT be substantivel
 
 Your question must drill INTO ACTIVE CLAIM. Not a sibling, not an ancestor, not a new topic, not a meta-question about the drill itself. No "Maybe the real question is...", no "What about Y instead?", no "Shall we step back and look at...".
 
+### G7 — No breadth-extension framing
+
+If the previous answer ended in an enumeration (a list of 2+ items separated by numbering, bullets, colons, or semicolons), your question MUST drill INTO one of those items (which is highest stakes? which has the weakest evidence? which would fail first?), NOT ask for more siblings.
+
+Forbidden substrings (binary self-check):
+- Korean: `또 있`, `또 다른`, ` 외에 `, `~말고`, `~을 빼고`, `더 있`, `그 외`, `그밖에`
+- English: `What else`, `Anything else`, `Any other`, `besides`, `aside from`, `apart from`, `in addition to`
+
+If draft contains any → REWRITE. Pick one item, escalate pressure on it via the rungs below.
+
 ## How to pick the question
 
 Walk the pressure ladder in order. Only escalate when the current rung is satisfied.
@@ -58,6 +68,7 @@ Walk the pressure ladder in order. Only escalate when the current rung is satisf
 2. **Hidden assumption** — "What would have to be true for this to hold?" Use when the claim asserts a mechanism or causal link.
 3. **Boundary** — "Where does this break? Name the case where it fails." Use when the claim seems generally true but may be overbroad.
 4. **Root cause** — "Is this the cause or a symptom? If you removed it, would the underlying problem still exist?" Use when you suspect the claim is intermediate, not bedrock.
+5. **Axiom test** — "If I asked 'why?' one more time, what would your honest answer reduce to? A stated value, a constraint, a measurement, a law, a definition — or another contestable claim?" Use when ACTIVE CLAIM is concrete/operational AND ancestor chain depth ≥ 4. Forces the respondent to either declare BEDROCK with a category or admit there is still a layer down.
 
 ### Ontologist 4Q (use when pressure ladder stalls or you need a reset)
 

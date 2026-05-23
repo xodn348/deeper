@@ -5,7 +5,7 @@ description: Depth-first interview that drills ONE claim to its bedrock (first p
 
 # deeper — depth-first interview (Claude Code edition)
 
-You are the LAUNCHER, not the orchestrator. The orchestration happens **inside an isolated worktree subagent** so the entire drill runs end-to-end in one main-session turn. You do not reason about the user's claim. You set up state, dispatch ONE worktree-isolated orchestrator subagent, and surface its output. Nothing else.
+You are the LAUNCHER, not the orchestrator. The orchestration happens **inside an isolated worktree subagent** dispatched in the background; the launcher arms a perception loop in the SAME turn so the drill streams progress live into chat. You do not reason about the user's claim. You set up state, dispatch the orchestrator (background) + Monitor (events stream), and surface what arrives. Nothing else.
 
 ## Repository assumption
 
@@ -37,16 +37,63 @@ This skill expects the `deeper` repo at `~/code/deeper/`. All paths below resolv
    Tell the user one line: `Run started: <RUN_ID> [mode=<MODE>]. State at <RUN_DIR>.`
 
 3. **Dispatch.**
-   - `MODE=auto`: go to **## Worktree-isolated orchestrator** below. Dispatch one Agent call with `isolation: "worktree"` and `subagent_type: "general-purpose"`, wait for it to return, then surface its output. **You are done after this single dispatch — never enter the per-round loop yourself.**
+   - `MODE=auto`: go to **## Worktree-isolated orchestrator** below. In the SAME turn:
+     (a) arm `Monitor` tailing `$RUN_DIR/events.jsonl` through `format-events.py` so
+         each event becomes one chat line, then
+     (b) dispatch the orchestrator with `isolation: "worktree"` AND
+         `run_in_background: true`, then
+     (c) tell the user one line ("Run started: $RUN_ID — streaming progress below.")
+         and end the turn cleanly. You will wake on each Monitor notification (one
+         per event) and on the orchestrator's completion notification. **Never enter
+         the per-round loop yourself.**
    - `MODE=interactive`: enter the per-round loop starting at N=1 (the legacy "## Each round" protocol below).
 
 ## Worktree-isolated orchestrator (auto mode — default)
 
-Dispatch ONE Agent call with:
-- `subagent_type: "general-purpose"`
-- `isolation: "worktree"`
-- `description: "deeper auto drill"`
-- `prompt`: send the template below verbatim, substituting `{RUN_ID}`, `{RUN_DIR}`, `{SEED}`, and `{CAP}` (default 8, override via `DEEPER_AUTO_CAP` env).
+The launcher executes THREE tool calls in one turn, then ends the turn:
+
+### A. Arm the perception loop (Monitor)
+
+```
+Monitor(
+  command: "tail -F -n 0 \"$RUN_DIR/events.jsonl\" | python3 -u $HOME/code/deeper/nodes/deeper/format-events.py",
+  description: "deeper $RUN_ID events stream",
+  persistent: true,
+  timeout_ms: 3600000
+)
+```
+
+Each `format-events.py` stdout line becomes one launcher notification:
+`[R{n} Q] ...` / `[R{n} A] ...` / `[R{n} ✓] depth=D done=B` / `[R{n} ⚠] STALL: ...` /
+`─── deeper {status} ───`. Capture the Monitor task id (returned by the tool) — you
+will pass it to `TaskStop` when the orchestrator completes.
+
+### B. Dispatch the orchestrator in the background
+
+```
+Agent(
+  subagent_type: "general-purpose",
+  isolation: "worktree",
+  run_in_background: true,
+  description: "deeper auto drill",
+  prompt: <orchestrator template below>
+)
+```
+
+Substituting `{RUN_ID}`, `{RUN_DIR}`, `{SEED}`, and `{CAP}` (default 8, override via
+`DEEPER_AUTO_CAP` env). Capture the agent id — the completion notification will
+reference it.
+
+### C. Tell the user one line and end the turn
+
+Example: `Run started: $RUN_ID (auto, cap=$CAP). Streaming progress — orchestrator running in background.`
+
+Then end the turn. Do NOT loop, do NOT poll. Wake on:
+- **Each Monitor notification** — the body IS a formatted event line. Emit it
+  verbatim to the user as a one-line text message, then end the turn.
+- **Orchestrator completion notification** — see "## After orchestrator completes" below.
+
+### Orchestrator template (substitute placeholders, send as `prompt`)
 
 ```
 You are the deeper auto-mode ORCHESTRATOR. You run inside an isolated git worktree
@@ -150,8 +197,24 @@ PER-ROUND LOOP (start N=1):
 
    No preamble. No "Answer:". No reasoning about which option you picked.
 
-   Save the verbatim A-subagent output to `$RUN_DIR/.a-raw-{N}.txt`. Emit an
-   answer_emitted event to `$RUN_DIR/events.jsonl` (answer, source="subagent").
+   Save the verbatim A-subagent output to `$RUN_DIR/.a-raw-{N}.txt`.
+
+   STALL SELF-HEAL — strip the saved file's content; if it is empty or whitespace-only:
+     i.   Append event {"type":"stall","round":N,"reason":"empty_a_sonnet"} to
+          `$RUN_DIR/events.jsonl` (this surfaces to the launcher as `[R{N} ⚠]`).
+     ii.  Re-dispatch the SAME A-subagent prompt with model "opus" (judgment escalation).
+          Overwrite `.a-raw-{N}.txt` with the retry output.
+     iii. If the retry is ALSO empty:
+            - Append event {"type":"stall","round":N,"reason":"empty_a_after_opus_retry"}.
+            - Overwrite `.a-raw-{N}.txt` with the literal string `STOP` (this triggers
+              model.py's BLOCKED path — model.py line 119: `if answer == "STOP"`).
+            - Proceed to step 4. model.py will print `BLOCKED: user requested STOP`,
+              the loop will exit cleanly at step 6, and STATUS will be `aborted`
+              with exit_reason `stall_round_N`.
+
+   Only AFTER the stall handler resolves (non-empty A, or STOP sentinel written),
+   emit an answer_emitted event to `$RUN_DIR/events.jsonl` (answer, source="subagent"
+   or "subagent-opus-retry"; if STOP was written, set source="stall-stop-sentinel").
 
 4. Run model.py to mutate `tree.json`:
 
@@ -173,6 +236,7 @@ ON EXIT:
 - Render the tree: `bash <DEEPER_ROOT>/nodes/deeper/render.sh "$RUN_DIR"` — capture its stdout.
 - Determine STATUS: `passed` if done=true, `auto_cap` if N hit CAP without done, `aborted` if BLOCKED.
 - Write `$RUN_DIR/outcome.json` with run_id, node="deeper", status, rounds=N, final_score (from last judge_result), exit_reason, violations_total (aggregated across judge_result events).
+- Append a terminal event {"type":"run_finished","status":STATUS,"rounds":N,"score":final_score} to `$RUN_DIR/events.jsonl`. This is the perception-loop sentinel — the launcher's formatter prints `─── deeper {status} ───` and the launcher knows to render the tree and close the run.
 
 RETURN to the launching session: a single text block containing
   1) one-line summary: "status=<STATUS> rounds=<N> score=<S> violations=<aggregated>",
@@ -183,7 +247,18 @@ RETURN to the launching session: a single text block containing
 Nothing else. No commentary. No analysis of the claim.
 ```
 
-After Agent returns, surface its output to the user verbatim. Then call `AskUserQuestion` to offer next-step actions — this is the visible signal that control has returned to the main session and the worktree work is done.
+## After orchestrator completes
+
+The completion notification mentions the agent id you captured in step B. When it arrives:
+
+1. `TaskStop` the Monitor task id captured in step A (stops the tail).
+2. Run `bash <DEEPER_ROOT>/nodes/deeper/render-dispatch.sh "$RUN_DIR"` and
+   `bash <DEEPER_ROOT>/nodes/deeper/render.sh "$RUN_DIR"` — print both to chat so
+   the user sees the final dispatch chain + tree (they already saw rounds live;
+   this is the consolidated closing view).
+3. Surface the orchestrator's returned block verbatim (its summary line + outcome.json path).
+4. Call `AskUserQuestion` to offer next-step actions — the structured UI is the
+   visible signal that control has returned to the main session and the drill is done.
 
 Question: `이 drill 이후로 뭘 할까?`
 
@@ -405,12 +480,12 @@ These apply to the MAIN-SESSION LAUNCHER (you, right now). The orchestrator suba
 | Thought | Reality |
 |---|---|
 | "The user is asking about the claim — let me just answer directly" | NO. You are the LAUNCHER. The claim text is for the worktree orchestrator, not for you. Never answer the claim, never assess it, never offer an alternate response. Dispatch the orchestrator. |
-| "Round 1 ended; let me pick it back up in this session" | NO. There are no rounds in the main session for auto mode. The whole drill is ONE Agent dispatch. If it returned without `passed`, that's the outcome — surface it and stop. |
+| "Round 1 ended; let me pick it back up in this session" | NO. The launcher only WAKES for Monitor notifications and orchestrator completion — it never executes a round. Each wake = emit one line, end turn. The drill itself runs entirely inside the background orchestrator. |
 | "The orchestrator subagent's output looks shallow; let me extend it" | NO. Pass through verbatim. If quality is bad, that's a BANS / judge lesson for the next run. |
 | "Let me read PROMPT.md / tree.json myself to add context" | NO. Main session reads NOTHING about the claim. Only the run dir paths and final outcome. |
 | "I'll write the answer because the subagent might say something I disagree with" | NO. The worktree orchestrator handles all Q and A. Main session never produces content. |
 | "Interactive mode is safer, let me default to that" | NO. Default = worktree auto. Interactive only when the user explicitly types `interactive`. |
-| "Let me analyze the user's claim while waiting for the orchestrator" | NO. Wait silently. The orchestrator returns the final block; you surface it. |
+| "Let me analyze the user's claim while waiting for the orchestrator" | NO. You are not "waiting" — you ended your turn. Wake-events come automatically. On each wake, emit the formatted event line verbatim. Do not interpret, do not extrapolate, do not commentary the claim. |
 | "I'll just ask the user inline in text — saves a tool call" | NO. Any user choice between options goes through `AskUserQuestion`. The structured UI is the visible separator between main session and worktree. Plain text only for free-form input. |
 | "The orchestrator could ask the user directly mid-drill" | NO. The orchestrator runs in an isolated worktree and never has a turn boundary with the user. It returns one block at the end. All user prompts are launcher-side via `AskUserQuestion`. |
 
