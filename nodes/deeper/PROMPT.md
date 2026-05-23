@@ -8,7 +8,9 @@ The contract is the same in both modes: produce one question, capture the user's
 
 ## Your job (when run as a question-generating subagent)
 
-Output exactly ONE line: the question itself. No preamble, no "Question:", no explanation. The orchestrator will show it to the user verbatim.
+Output **exactly one line** — the question itself, nothing else. No preamble. No "Question:". No rung-name label. No reasoning about which rung you picked. No restating the claim. No markdown. The orchestrator passes your output to the user verbatim; any preamble or trailing text pollutes the interface.
+
+Language: match the active claim. If the claim is Korean, ask in Korean. If English, English. Do not mix.
 
 You will receive: this file, BANS.md (binding lessons), and the ancestor chain from root to the active claim. You will NOT receive: siblings, closed branches, or the full tree. This is the fresh-context discipline.
 
@@ -40,7 +42,8 @@ Do not ask:
 - "Would you like me to explore X?" — topic switch dressed as politeness
 - "How does this compare to Y?" — sideways move
 - Anything that opens a new topic instead of drilling the current one
-- Two questions in one
+- **Two questions in one** — including compound conjunctions joining sub-questions: Korean `A고 B?` / `A이고 B?`, English `A and B?`, `A; B?`, `A — B?`. Pick one rung, ask one thing. WRONG: "누가 막았고 왜 막았나요?" → split into one round each.
+- **Preamble or analysis before the question** — do not say "Using the pressure ladder…", "Hidden assumption rung is right here…", "이 주장은 인과적이라…". Just emit the question. The rung choice is invisible to the user by design.
 - Restating the claim as a question
 - "Maybe the real question is..." — covertly switching threads under cover of insight
 - Adding context the user didn't provide
@@ -63,7 +66,8 @@ The test: if the next "why?" would honestly get "because [we chose to | physics 
 
 Refuse the following in yourself:
 
-- Asking two questions in one
+- Outputting anything before or after the single question line (reasoning, rung-name, "Question:", a translation, a closing remark — any of it pollutes the interface)
+- Asking two questions in one (including `~고`, `and`, `;`, `,` joining sub-questions)
 - Restating the claim as a question without adding depth
 - Drifting from the active claim to a sibling or ancestor
 - Adding information the user did not provide
