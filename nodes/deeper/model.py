@@ -35,18 +35,23 @@ def must_env(name: str) -> str:
 
 
 def read_answer(prompt: str) -> str:
+    # Preferred: file-backed answer (skill mode — avoids shell-quoting headaches)
+    if af := os.environ.get("DEEPER_ANSWER_FILE"):
+        return Path(af).read_text().rstrip("\n")
+    # Secondary: env-var answer (autonomous tests, simple scripts)
     auto = os.environ.get("DEEPER_AUTO_ANSWER")
     if auto is not None:
         print(prompt, file=sys.stderr)
         print(f"(auto) {auto}", file=sys.stderr)
         return auto
+    # Fallback: interactive tty (bash CLI mode)
     try:
         with open("/dev/tty", "r+") as tty:
             tty.write(prompt)
             tty.flush()
             return tty.readline().rstrip("\n")
     except OSError:
-        sys.exit("model.py: no /dev/tty and DEEPER_AUTO_ANSWER unset")
+        sys.exit("model.py: no /dev/tty, DEEPER_ANSWER_FILE, or DEEPER_AUTO_ANSWER set")
 
 
 def walk(tree: dict, path: list[int]) -> dict:

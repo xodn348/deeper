@@ -108,16 +108,34 @@ MODEL_CMD="bash harness/lib/mock-model.sh" \
 
 Watch BANS.md fill up and the run score climb from 0.25 to 1.0.
 
-### Depth-first interview (interactive, human-in-loop)
+### Depth-first interview — Claude Code skill (recommended)
+
+Install (one-time):
+
+```bash
+mkdir -p ~/.claude/skills
+ln -s ~/code/deeper/skills/deeper ~/.claude/skills/deeper
+```
+
+Use:
+
+```
+/deeper why does X keep happening?
+```
+
+The skill orchestrates a per-round dispatch loop: a fresh subagent generates each depth question using the pressure ladder / Ontologist 4Q; you reply in chat with free text / `BEDROCK:<cat>` / `BRANCH:<sibling>` / `STOP`. State persists in `runs/deeper/<run-id>/tree.json`. Resume with `/deeper resume <run-id>`. Full orchestrator spec in `skills/deeper/SKILL.md`.
+
+### Depth-first interview — bash CLI (no Claude Code)
 
 ```bash
 cd ~/code/deeper
 MODEL_CMD="python3 nodes/deeper/model.py" \
   bash harness/loop.sh deeper nodes/deeper/sample-seed.md my-first-drill
-# answer each prompt; type BEDROCK:<category> when you hit an axiom,
-#   BRANCH:<sibling> to open a parallel cause, STOP to abort.
+# Answer each prompt; BEDROCK:<category> for axiom, BRANCH:<sibling> for parallel cause, STOP to abort.
 bash nodes/deeper/render.sh runs/deeper/my-first-drill   # view the tree
 ```
+
+The bash version uses `model.py`'s mechanical "Why X?" prompt — no LLM. The skill above adds the LLM question-generation layer on top of the same state files. Fully compatible.
 
 ### Swap to real Claude (commit-msg, autonomous)
 
