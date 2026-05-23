@@ -11,6 +11,57 @@ You are the LAUNCHER, not the orchestrator. The orchestration happens **inside a
 
 This skill expects the `deeper` repo at `~/code/deeper/`. All paths below resolve from there.
 
+## Pre-flight (MANDATORY — transactional cwd)
+
+`/deeper` can be invoked from any cwd ($HOME, another project, etc.), but `Agent(isolation: "worktree")` only works when the launcher's cwd is inside a git repo. Without this step, the first dispatch fails with `Cannot create agent worktree: not in a git repository`.
+
+The methodology is **transactional**: borrow the launcher cwd into `~/code/deeper` for the duration of the drill, then restore it. This preserves the user's original context (they may have invoked `/deeper` from another project they're debugging) while still letting Claude's native worktree-isolation UI kick in.
+
+**Step 0 — Enter (run BEFORE mode-determination, run-state setup, Monitor arming, or any Agent dispatch):**
+
+```bash
+# Save the user's original cwd for later restoration.
+ORIG_CWD="$(pwd)"
+
+# Verify deeper repo exists. If not, abort cleanly — do not try to recover.
+test -d "$HOME/code/deeper/.git" || {
+  python3 -c "import json,os,time; print(json.dumps({'ts':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'event':'launcher_failed','orig_cwd':'$ORIG_CWD','reason':'deeper_repo_missing'}))" >> "$HOME/code/deeper/runs/deeper/.launcher.jsonl" 2>/dev/null || true
+  echo "failed: deeper repo missing at ~/code/deeper — install or clone before retrying."
+  exit 1
+}
+
+# Borrow the launcher cwd. Bash cwd persistence carries this through the session.
+cd "$HOME/code/deeper"
+
+# Cross-run launcher log — one line per invocation. Records who/when/where so a later
+# /deeper resume or post-mortem can reconstruct the invocation chain.
+mkdir -p "$HOME/code/deeper/runs/deeper"
+python3 -c "import json,os,time; print(json.dumps({'ts':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'event':'launcher_enter','orig_cwd':'$ORIG_CWD','pid':os.getpid()}))" >> "$HOME/code/deeper/runs/deeper/.launcher.jsonl"
+```
+
+Then, AFTER you have computed `RUN_ID` and created `$RUN_DIR` in step 2 of "## On invocation", persist `$ORIG_CWD` into the run state so the exit handler can find it even if the launcher session is resumed later:
+
+```bash
+echo "$ORIG_CWD" > "$RUN_DIR/.orig-cwd"
+```
+
+**Step N — Exit (in BOTH success and failure paths of "## After orchestrator completes"):**
+
+```bash
+ORIG_CWD="$(cat "$RUN_DIR/.orig-cwd" 2>/dev/null)"
+python3 -c "import json,time; print(json.dumps({'ts':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'event':'launcher_exit','run_id':'$RUN_ID','status':'$STATUS','orig_cwd':'$ORIG_CWD'}))" >> "$HOME/code/deeper/runs/deeper/.launcher.jsonl"
+[ -n "$ORIG_CWD" ] && [ -d "$ORIG_CWD" ] && cd "$ORIG_CWD"
+```
+
+**Invariants this enforces:**
+
+1. **Per-invocation worktree isolation** — `Agent(isolation: "worktree")` creates `~/code/deeper/.claude/worktrees/agent-<id>/` per call. Concurrent `/deeper` invocations get disjoint worktrees automatically (Claude's native mechanism).
+2. **Cwd is borrowed, not stolen** — restored at exit, so the user's original working context survives the drill.
+3. **Two-layer logging** — per-run drill events in `$RUN_DIR/events.jsonl` (already existed); cross-run invocation log in `runs/deeper/.launcher.jsonl` (new). Together they let you reconstruct any past invocation.
+4. **Idempotent and safe** — running pre-flight from inside the repo is a no-op cd. Failure mode (`failed:`) is clean and logged before exit.
+
+Do not skip this. Do not refactor it into a single inline command "for brevity" — each line is load-bearing.
+
 ## On invocation
 
 **UI discipline (main-session launcher only)**: when the launcher needs the user to choose between options, ALWAYS use the `AskUserQuestion` tool — never a plain text prompt embedded in your message. The structured UI makes it visually unambiguous that the question is coming from the main session, not from whatever the worktree orchestrator is doing. Plain text is fine only for free-form input (e.g. seed claim entry) where no discrete options exist.
@@ -281,6 +332,17 @@ Options depend on the returned STATUS:
   - **Done** — nothing more
 
 Then execute whatever the user picked. If they pick **Done** or **Other** with no actionable text, end your turn silently. **Never** narrate or "interpret" the drill's outcome — surface the orchestrator's block, surface the UI choices, do what's picked, stop.
+
+5. **Exit handler (MANDATORY — restore the launcher's original cwd, per the Pre-flight transactional contract):**
+
+```bash
+ORIG_CWD="$(cat "$RUN_DIR/.orig-cwd" 2>/dev/null)"
+STATUS="<from orchestrator outcome — passed | auto_cap | aborted | failed>"
+python3 -c "import json,time; print(json.dumps({'ts':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'event':'launcher_exit','run_id':'$RUN_ID','status':'$STATUS','orig_cwd':'$ORIG_CWD'}))" >> "$HOME/code/deeper/runs/deeper/.launcher.jsonl"
+[ -n "$ORIG_CWD" ] && [ -d "$ORIG_CWD" ] && cd "$ORIG_CWD"
+```
+
+Run this in EVERY exit path — success (passed), partial (auto_cap), abort (aborted/BLOCKED), AND any unhandled failure. The cwd restoration is non-negotiable: without it, the user's session is left stranded inside `~/code/deeper` even though they invoked `/deeper` from somewhere else entirely.
 
 That ends the main session's involvement.
 
