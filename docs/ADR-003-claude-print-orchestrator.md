@@ -36,11 +36,13 @@ Session auth is the default behavior — `claude -p` reads the OAuth token / key
 
 The main session writes per-round prompt files (`.q-sys-{N}.txt` + `.q-user-{N}.txt` for Q, `.a-sys-{N}.txt` + `.a-user-{N}.txt` for A) and runs ask.sh as a `Bash` tool call, capturing stdout to `.q-raw-{N}.txt` / `.a-raw-{N}.txt`. Everything downstream (model.py, judge.sh, the launcher loop's done/continue branch, the stall self-heal path) is unchanged.
 
-Default `DEEPER_AUTO_CAP` raised 8 → 10 to match the per-round latency drop.
+Default `DEEPER_AUTO_CAP` raised 8 → 10.
 
-## Measured latency (smoke test, 2026-05-24)
+## Measured latency
 
-Floor probe (`claude -p --no-session-persistence --disable-slash-commands --tools "" --model haiku "Reply with: 1" </dev/null`), three sequential cold calls:
+### Floor probe (empty prompt)
+
+`claude -p --no-session-persistence --disable-slash-commands --tools "" --model haiku "Reply with: 1" </dev/null`, three sequential cold calls:
 
 | Call | wall-clock |
 |---|---|
@@ -48,14 +50,37 @@ Floor probe (`claude -p --no-session-persistence --disable-slash-commands --tool
 | 2 | 9.2s |
 | 3 | 10.1s |
 
-Real round-shaped probe with full system prompt (~5 KB):
+### Full e2e drill, 3 rounds (run `deeper-e2e-20260524T200031Z`, 2026-05-24)
 
-| Call | wall-clock |
-|---|---|
-| Q haiku, real prompt + active claim | ~10s |
-| A sonnet, real prompt + active claim + question | ~10s |
+Seed: `Python의 GIL은 멀티스레딩 성능을 제한한다`. Q system prompt = PROMPT.md (~5 KB) + role framing; A system prompt = inline A1–A5 guards only (~600 B).
 
-Per-round cost: Q + A + model.py (<0.5s) + judge.sh (<0.5s) + bookkeeping ≈ **22s/round**. Ten-round drill ≈ **3.7 minutes**. Prior Agent-dispatch path was an estimated 4–8 minutes for eight rounds; this is roughly 2× faster *and* extends to ten rounds.
+| Round | Q (haiku) | A (sonnet) | Round total |
+|---|---|---|---|
+| R1 | 40s | 18s | 58s |
+| R2 | 57s | 13s | 70s |
+| R3 | 42s | 14s | 56s |
+
+**Per-round wall-clock: ~60s. Ten-round drill: ~10 minutes.**
+
+### Reading the numbers
+
+The floor-probe latency (~10s) was the cost of CC boot for a near-empty prompt. The Q latency under load (~45s avg) is **4× the floor**, despite using the smaller model — because the 5 KB PROMPT.md goes through the system-prompt path on every call. A's latency (~15s avg) is **lower than Q's** despite using sonnet, because A's system prompt is only the short A1–A5 guards.
+
+**System-prompt size, not model size, is the dominant per-call cost.** The prediction in this ADR's first draft (~10s/call → 22s/round → 3.7 min for 10 rounds) was based on the floor probe and did not account for system-prompt overhead.
+
+### Comparison to the prior Agent-dispatch path
+
+The prior path was never measured end-to-end in production, so the original "5–10 minute" estimate was inferred from subagent boot times observed in isolated rounds, not from a full drill. The honest accounting: this ADR delivers (a) no API-key requirement, (b) a simple subprocess call shape that's easy to inspect and debug, and (c) `DEEPER_AUTO_CAP=10` as the new default. The *speed gain* over the Agent path is unclear without a controlled benchmark of both. Users should plan for ~10 minutes for a 10-round drill.
+
+### Follow-up optimization (out of scope for this ADR)
+
+System-prompt size is the lever. Likely interventions, in order of expected payoff:
+
+1. **Trim PROMPT.md to model-facing content.** Much of the current file is documentation for human readers. A ~500-byte synthesis of (a) the rung ladder, (b) HARD GUARDS G1–G7, (c) bedrock categories should be sufficient for the Q model and would likely 3–4× the per-call speed.
+2. **Move PROMPT.md content into the user-turn prompt** instead of the system prompt — at least until prompt caching is wired up. Anthropic's prompt cache hashes the system prompt; if Q's system prompt becomes stable (PROMPT.md text without the round-N substitution), the cache hit on call 2+ should be nearly instant. The current shape has `round-N` baked into the system prompt, which breaks that.
+3. **Investigate `claude -p` prompt-cache flags.** If exposed, mark the PROMPT.md block as cacheable explicitly.
+
+These optimizations may roll into ADR-004 once measured.
 
 ## Why not `--bare`
 
@@ -80,6 +105,7 @@ ADR-002's core decision — *"the main session IS the orchestrator, single-turn 
 
 ## Open work
 
-- Real-run validation: trigger a full `/deeper <claim>` drill end-to-end and confirm wall-clock ≈ 3.7 min for 10 rounds. The smoke test only ran Q and A standalone; the full launcher loop, model.py mutations, judge.sh checks, and Monitor streaming have not been exercised together with the new ask.sh path.
-- `harness/feedback.sh` and `nodes/deeper/judge.sh` reference the `source` field on `answer_emitted` events. ask.sh-era values are `"subprocess"`, `"subprocess-opus-retry"`, `"stall-stop-sentinel"` (replacing `"subagent"` etc.). Check that feedback.sh's aggregation doesn't key on the old values.
-- Eventually consider a `claude -p` connection-warmup trick: fire a no-op call at run start to prime any OAuth-token or model-routing cache, hopefully amortizing the cold-start across the run rather than paying it per round.
+- ~~Real-run validation~~ — done. 3-round e2e drill (`deeper-e2e-20260524T200031Z`) executed via `/tmp/deeper-e2e.sh` (a Bash driver that replays the SKILL.md round-handler protocol directly). tree.json well-formed, events.jsonl has expected event sequence, model.py mutations correct, judge.sh produces clean `judge_result` events, render-dispatch labels show `claude -p (haiku)` / `claude -p (sonnet)` as designed. See **Measured latency → Full e2e drill** above for the numbers.
+- ~~`harness/feedback.sh` source-key check~~ — done. feedback.sh only reads `judge_result.violations`; no dependency on `answer_emitted.source` values. No breakage from the "subagent" → "subprocess" rename.
+- **Latency optimization** — the e2e drill showed system-prompt size dominates per-call latency (Q-haiku at 45s avg vs A-sonnet at 15s avg, despite the larger model — see Measured latency). Trim PROMPT.md or move it to the user-turn prompt to recover the predicted speed. Filed for ADR-004.
+- **Connection warmup** — fire a no-op `claude -p` at run start to prime any OAuth-token / model-routing cache, hopefully amortizing the cold-start. Cheap, may shave the R1 outlier.
