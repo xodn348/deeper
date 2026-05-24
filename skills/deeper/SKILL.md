@@ -26,6 +26,32 @@ This skill expects the `deeper` repo at `~/code/deeper/`. All paths below resolv
      - **Interactive** — human answers each round in chat
      Then end your turn. On the user's reply, ask for the seed claim as plain text (free-form, no fixed options).
 
+1b. **Stuck-run pre-flight check (race-recovery safety net).** Before creating a new RUN_ID, scan for any prior run that started but never reached a terminal state — this catches the case where a previous launcher session crashed, was interrupted, or hit the (now-fixed) judge_result wake race and left the user with no obvious recovery path.
+
+    ```bash
+    STUCK=$(python3 -c "
+    import json, pathlib
+    base = pathlib.Path.home() / 'code' / 'deeper' / 'runs' / 'deeper'
+    out = []
+    for d in sorted(base.glob('deeper-*'), reverse=True)[:10]:
+        if (d / 'outcome.json').exists(): continue
+        ev = d / 'events.jsonl'
+        if not ev.exists(): continue
+        last = ''
+        for line in ev.read_text().splitlines():
+            if line.strip(): last = line
+        if not last: continue
+        try: e = json.loads(last)
+        except: continue
+        if e.get('type') == 'judge_result' and not e.get('detail',{}).get('done'):
+            seed = (d/'seed.md').read_text()[:80].replace('\n',' ') if (d/'seed.md').exists() else ''
+            out.append(f'{d.name}|{e.get(\"round\",\"?\")}|{seed}')
+    print('\n'.join(out))
+    ")
+    ```
+
+    If `STUCK` is non-empty, call `AskUserQuestion` with options (one per stuck run, up to 4): label `Resume <RUN_ID> (R{round}, "{seed snippet}")`, plus a final `Start fresh anyway` option. If the user picks resume, jump to **## Resumption**. If they pick fresh, continue to step 2 below.
+
 2. **Once you have the seed, set up the run state in the main repo (not in any worktree):**
    ```bash
    RUN_ID="deeper-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -75,12 +101,15 @@ Execute in this order:
 3. Tell the user one line: `Run started: $RUN_ID (auto, cap=$CAP). Streaming progress below.`
 
 4. **Loop**: for N = 1, 2, 3, ...:
-   a. Run the **Round handler** below for round N.
-   b. After judge.sh completes, read the last line of `$RUN_DIR/events.jsonl`. Parse the `judge_result` event.
-   c. If `detail.done == true` → break loop, go to "## After completion (exit handler)" with status `passed`.
-   d. If N >= CAP (default 8, `DEEPER_AUTO_CAP` overrides) → break loop, go to "## After completion" with status `auto_cap`.
-   e. If model.py printed `BLOCKED:` (saved in state.md / event) → break loop, go to "## After completion" with status `aborted` (reason: `stall_round_N` or `user_stop`).
-   f. Otherwise: increment N, continue immediately to the next round in the same turn. Do NOT end the turn between rounds.
+   a. Run the **Round handler** below for round N. Capture two signals from the round:
+      - `MODEL_BLOCKED=1` if model.py's stdout started with `BLOCKED:` (stall self-heal sentinel).
+      - `JUDGE_EXIT` = the exit code of `judge.sh` (see `nodes/deeper/judge.sh` header — `0`=continue, `100`=done, `1`=error).
+   b. Branch on those signals — **never re-read events.jsonl or re-parse stdout to decide done/continue**, because the prior design's race condition came from exactly that kind of secondary state dependence. The judge's exit code IS the authoritative signal.
+   c. If `MODEL_BLOCKED=1` → break loop, go to "## After completion (exit handler)" with status `aborted` (reason: `stall_round_N` or `user_stop`).
+   d. If `JUDGE_EXIT == 100` → break loop, go to "## After completion" with status `passed`.
+   e. If `JUDGE_EXIT == 1` → break loop, go to "## After completion" with status `aborted` (reason: `judge_error_round_N`).
+   f. If `JUDGE_EXIT == 0` and N >= CAP (default 8, `DEEPER_AUTO_CAP` overrides) → break loop, go to "## After completion" with status `auto_cap`.
+   g. Otherwise (`JUDGE_EXIT == 0` and N < CAP): increment N, continue immediately to the next round in the same turn. Do NOT end the turn between rounds.
 
 5. After the exit handler runs, end the turn with the consolidated rendered tree as the final message.
 
@@ -158,18 +187,31 @@ Given the round number N:
 
    After the stall handler resolves, emit an `answer_emitted` event (`answer`, `source="subagent" | "subagent-opus-retry" | "stall-stop-sentinel"`).
 
-4. **Run model.py**:
+4. **Run model.py** — capture stdout and check for the `BLOCKED:` sentinel:
 
    ```bash
-   DEEPER_ANSWER_FILE=$RUN_DIR/.a-raw-{N}.txt SEED_FILE=$RUN_DIR/seed.md ROUND={N} \
-     python3 ~/code/deeper/nodes/deeper/model.py
+   MODEL_OUT=$(DEEPER_ANSWER_FILE=$RUN_DIR/.a-raw-{N}.txt SEED_FILE=$RUN_DIR/seed.md ROUND={N} \
+     python3 ~/code/deeper/nodes/deeper/model.py)
+   MODEL_BLOCKED=0
+   case "$MODEL_OUT" in BLOCKED:*) MODEL_BLOCKED=1 ;; esac
+   printf '\n--- round %d ---\n%s\n' {N} "$MODEL_OUT" >> "$RUN_DIR/state.md"
    ```
 
-   Append the one-line stdout to `$RUN_DIR/state.md` with a `--- round N ---` header.
+   Pass `MODEL_BLOCKED` back to the launcher loop (step 4) along with `JUDGE_EXIT` from step 5.
 
-5. **Run judge**: `bash ~/code/deeper/nodes/deeper/judge.sh "$RUN_DIR" {N}`.
+5. **Run judge** — capture its exit code, which is the launcher loop's authoritative done/continue signal:
 
-6. **Return control to the launcher loop** (step 4 of "Launcher entry") — which inspects the judge_result and either continues to the next round or exits.
+   ```bash
+   bash ~/code/deeper/nodes/deeper/judge.sh "$RUN_DIR" {N} || JUDGE_EXIT=$?
+   JUDGE_EXIT=${JUDGE_EXIT:-0}
+   ```
+
+   Exit code reference (see `nodes/deeper/judge.sh` header):
+   - `0` → not done, continue looping
+   - `100` → `detail.done == true`, drill complete
+   - `1` → internal error in judge.sh (treat as `aborted` reason `judge_error_round_N`)
+
+6. **Return control to the launcher loop** (step 4 of "Launcher entry") with `MODEL_BLOCKED` (from step 4 of this handler) and `JUDGE_EXIT` (from step 5). The launcher loop decides done/continue using ONLY those two integers — never re-reads events.jsonl. This is the architectural guarantee against future race conditions.
 
 ### User-interrupt path
 
@@ -428,6 +470,8 @@ The launcher orchestrates the round loop itself, but it NEVER produces content �
 | "Let me read tree.json and reason about the claims" | NO. Read tree.json only to extract `cursor` and assemble the ancestor chain. Do not interpret the claims themselves. |
 | "Let me end the turn between rounds — multi-turn looks cleaner" | NO. The launcher loops rounds in a single turn until done/cap. Single-turn looping is REQUIRED to avoid the judge_result-notification race (a fast judge.sh consumes the wake notification mid-turn, leaving no pending notification → deadlock). Monitor's stream still surfaces each Rx event as a system reminder; focus mode hides intermediate assistant text but tool-call events remain visible. |
 | "Let me arm Monitor as background but skip looping in this turn" | NO. The Monitor is a visualization channel only — it cannot wake the launcher reliably (race condition documented above). The loop body itself drives round progression. |
+| "I'll re-read events.jsonl to confirm whether the drill is done" | NO. The judge.sh exit code IS the authoritative signal: `0`=continue, `100`=done, `1`=error. Re-reading events.jsonl re-introduces the same class of secondary-state-dependence that caused the original race. Trust the integer; do not double-check. |
+| "Let me parse model.py stdout AFTER appending to state.md to detect BLOCKED" | NO. Capture `MODEL_OUT` in a variable BEFORE the redirect, check the `BLOCKED:` prefix on the variable, then append. Pulling state back out of a file you just wrote is exactly the secondary-read pattern that race conditions thrive on. |
 | "User message mid-drill — let me interpret it as a normal answer" | NO. The A-subagent answers, not the user. A mid-drill user message means STOP/interrupt. End the drill cleanly via "## After completion" with status `aborted` reason `user_interrupt`. |
 | "Interactive mode is safer, let me default to that" | NO. Default = auto. Interactive only when the user explicitly types `interactive`. |
 | "Let me skip Monitor — it's just decoration" | NO. Monitor is the user-visible progress channel. Without it, focus mode shows nothing until completion. Arm it at launcher entry unconditionally. |

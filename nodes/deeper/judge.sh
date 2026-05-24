@@ -11,13 +11,25 @@
 #
 # This closes the self-improvement loop for question-shape lessons — feedback.sh promotes
 # recurring keys to BANS.md the same way it does for tree-shape violations.
+#
+# Exit codes (let the launcher loop decide done/continue WITHOUT re-reading events.jsonl
+# or parsing stdout — guards against any future event-stream/wake race condition):
+#   0   → continue: not done, keep looping
+#   100 → done: detail.done == true (all leaves closed, cursor==null)
+#   1   → internal error (default from set -e)
+# The launcher OR's in a separate BLOCKED check from model.py's stdout before judge runs.
 
 set -euo pipefail
 
 RUN_DIR="${1:?run-dir required}"
 ROUND="${2:?round required}"
+TMP_OUT="$(mktemp)"
+trap 'rm -f "$TMP_OUT"' EXIT
 
-python3 - "$RUN_DIR" "$ROUND" <<'PYEOF' >> "$RUN_DIR/events.jsonl"
+# Run the judge into a tmp file first, then append atomically to events.jsonl so we can
+# also inspect the JSON to set the exit code. Two-step write avoids partial appends if
+# the python block dies mid-write.
+python3 - "$RUN_DIR" "$ROUND" >"$TMP_OUT" <<'PYEOF'
 import json, re, sys, time, pathlib
 
 run_dir = pathlib.Path(sys.argv[1])
@@ -110,3 +122,19 @@ event = {
 }
 print(json.dumps(event, separators=(",", ":")))
 PYEOF
+
+# Atomic-ish append: the python block already finished, the file is a single line.
+cat "$TMP_OUT" >> "$RUN_DIR/events.jsonl"
+
+# Decide exit code from the emitted event so the launcher never has to re-read state.
+DONE=$(python3 -c '
+import json, sys
+with open(sys.argv[1]) as f:
+    e = json.loads(f.read())
+print("1" if e.get("detail", {}).get("done") else "0")
+' "$TMP_OUT")
+
+if [ "$DONE" = "1" ]; then
+  exit 100
+fi
+exit 0
