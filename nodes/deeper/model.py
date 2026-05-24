@@ -54,6 +54,14 @@ def read_answer(prompt: str) -> str:
         sys.exit("model.py: no /dev/tty, DEEPER_ANSWER_FILE, or DEEPER_AUTO_ANSWER set")
 
 
+def atomic_write_json(path: Path, data: dict) -> None:
+    # tree.json is the run's single source of truth. A crash mid-write leaves
+    # the run unresumable; write to a sibling tempfile and rename atomically.
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    os.replace(tmp, path)
+
+
 def walk(tree: dict, path: list[int]) -> dict:
     node = tree["root"]
     for i in path:
@@ -117,7 +125,7 @@ def main() -> int:
     outcome = "advanced"
 
     if answer == "STOP":
-        tree_path.write_text(json.dumps(tree, indent=2))
+        atomic_write_json(tree_path, tree)
         print(f"round {round_num}: cursor={tree['cursor']} STOP")
         print("BLOCKED: user requested STOP")
         return 0
@@ -165,7 +173,7 @@ def main() -> int:
         tree["cursor"] = tree["cursor"] + [len(cursor_node["children"]) - 1]
         outcome = "advanced"
 
-    tree_path.write_text(json.dumps(tree, indent=2))
+    atomic_write_json(tree_path, tree)
 
     safe_answer = answer.replace('"', "'")[:80]
     print(f"round {round_num}: cursor={tree['cursor']} answer=\"{safe_answer}\" outcome={outcome}")
