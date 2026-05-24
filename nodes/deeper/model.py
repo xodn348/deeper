@@ -9,11 +9,15 @@ One invocation = one ralph iteration.
 - Mutates tree.json in place.
 - Prints one summary line on stdout for the harness.
 
-Special user inputs:
-  BEDROCK:<category>       close this branch; child carries the axiom
-  BRANCH:<sibling-claim>   open a parallel branch under the same parent
-  STOP                     emit BLOCKED and exit
-  anything else            normal answer; cursor descends into the new child
+Output protocol (one line on stdout):
+  round <N>: cursor=<path> answer="<a>" outcome=<advanced|bedrock|branch|stop>
+If cursor=null after the round, the next judge detects "no open leaves" and ends the run.
+
+Tree mutation rules:
+  normal answer            → append child under cursor, cursor descends (deeper)
+  BEDROCK:<category>       → close current, cursor pops to next open leaf (DFS-deepest)
+  BRANCH:<sibling-claim>   → append sibling under parent, cursor jumps (parallel cause)
+  STOP                     → emit "BLOCKED: user requested STOP", exit
 """
 
 import json

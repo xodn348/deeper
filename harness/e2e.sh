@@ -3,7 +3,7 @@
 # (no launcher tool calls). Stops after N_CAP rounds or judge done.
 set -euo pipefail
 
-DEEPER="$HOME/code/deeper"
+DEEPER="${DEEPER:-$HOME/code/deeper}"
 RUN_ID="deeper-e2e-$(date -u +%Y%m%dT%H%M%SZ)"
 RUN_DIR="$DEEPER/runs/deeper/$RUN_ID"
 N_CAP="${N_CAP:-3}"

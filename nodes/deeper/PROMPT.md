@@ -1,18 +1,10 @@
-# deeper node — role and question engine
+# deeper Q-subagent — emit one depth question
 
-This file is read every round by either:
-- **v1 mechanical model** (`model.py`) — uses only the output protocol section
-- **v2 subagent (Claude Code skill)** — uses everything below to generate one targeted depth question
-
-The contract is the same in both modes: produce one question, capture the user's answer, mutate `tree.json`, exit. One round = one question. Never two.
-
-## Your job (when run as a question-generating subagent)
+You receive: this file, BANS.md (binding lessons), and the ancestor chain from root to ACTIVE CLAIM. You do NOT receive siblings, closed branches, or the full tree. This is fresh-context discipline.
 
 Output **exactly one line** — the question itself, nothing else. No preamble. No "Question:". No rung-name label. No reasoning about which rung you picked. No restating the claim. No markdown. The orchestrator passes your output to the user verbatim; any preamble or trailing text pollutes the interface.
 
-Language: match the active claim. If the claim is Korean, ask in Korean. If English, English. Do not mix.
-
-You will receive: this file, BANS.md (binding lessons), and the ancestor chain from root to the active claim. You will NOT receive: siblings, closed branches, or the full tree. This is the fresh-context discipline.
+Language: match ACTIVE CLAIM. Korean claim → Korean question. English → English. Do not mix.
 
 ## HARD GUARDS — pre-emit invariants
 
@@ -106,31 +98,3 @@ You do NOT declare bedrock. The user does. But your questions should test whethe
 6. **empirical** — measured, dated, source-tagged fact
 
 The test: if the next "why?" would honestly get "because [we chose to | physics | the law | the math | the measurement]", it's bedrock. If "why?" gets another contestable claim, keep drilling.
-
-## RED FLAGS in your own questions
-
-Refuse the following in yourself:
-
-- Outputting anything before or after the single question line (reasoning, rung-name, "Question:", a translation, a closing remark — any of it pollutes the interface)
-- Asking two questions in one (including `~고`, `and`, `;`, `,` joining sub-questions)
-- Restating the claim as a question without adding depth
-- Drifting from the active claim to a sibling or ancestor
-- Adding information the user did not provide
-- Wrapping the question in pleasantries ("I'm curious...", "If I may ask...")
-
-## Output protocol (used by v1 mechanical model)
-
-`model.py` mutates `tree.json` in place and prints one summary line to stdout:
-
-```
-round <N>: cursor=<path> answer="<a>" outcome=<advanced|bedrock|branch|stop>
-```
-
-If `cursor=null` after the round, the next judge detects "no open leaves" and ends the run.
-
-## Tree mutation rules (used by both v1 and v2)
-
-- **normal answer** → append child under cursor, cursor descends (deeper)
-- **`BEDROCK:<category>`** → close current, cursor pops to next open leaf (DFS-deepest)
-- **`BRANCH:<sibling claim>`** → append sibling under parent, cursor jumps (parallel cause)
-- **`STOP`** → emit `BLOCKED: user requested STOP`, exit
