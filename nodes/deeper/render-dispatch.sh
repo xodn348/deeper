@@ -65,13 +65,18 @@ for i, r in enumerate(ordered):
     print(f"{trunk} R{r}")
     q = block["question"]
     if q:
-        src = "Explore subagent"
-        print(f"{pipe}   [Q] {src}")
+        print(f"{pipe}   [Q] claude -p (haiku)")
         print(f"{pipe}       → {shorten(q.get('question'), 110)}")
     a = block["answer"]
     if a:
         src = a.get("source", "?")
-        label = "Explore subagent" if src == "subagent" else "user"
+        label = {
+            "subprocess": "claude -p (sonnet)",
+            "subprocess-opus-retry": "claude -p (opus retry)",
+            "subagent": "Explore subagent (legacy)",
+            "subagent-opus-retry": "Explore subagent opus retry (legacy)",
+            "stall-stop-sentinel": "stall STOP",
+        }.get(src, "user")
         print(f"{pipe}   [A] {label}")
         print(f"{pipe}       → {shorten(a.get('answer'), 110)}")
     j = block["judge"]
