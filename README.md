@@ -1,5 +1,7 @@
 # deeper
 
+![License](https://img.shields.io/badge/license-Sustainable%20Use%201.0-blue)
+
 A self-improving [ralph loop](https://ghuntley.com/ralph/) framework. One harness, pluggable nodes, lessons that compound across runs.
 
 The marquee node is **deeper** itself — a depth-first interview that drills ONE claim to its bedrock (first principle / axiom / source of truth), exposed as a Claude Code slash command. Every existing interview skill (`superpowers:brainstorming`, `omx:deep-interview`, `pegasus-init`, `gstack:office-hours`, `ouroboros`) is built to *keep breadth* and fight tunneling. `deeper` does the opposite — it commits to one claim and refuses to widen until that claim reaches bedrock. The reference verification node, `commit-msg`, runs autonomously against a deterministic mock so the self-improvement loop is testable for free.
@@ -295,3 +297,14 @@ docs/ATTRIBUTION.md         # per-source IP posture (superpowers / omx / ourobor
 ## Status
 
 See `workflow/status.md`.
+
+## License
+
+Source-available under the **Sustainable Use License v1.0** (see
+[`LICENSE.md`](LICENSE.md)). Internal business use and non-commercial /
+personal use are permitted. Commercial redistribution — including offering
+deeper as a hosted service or embedding it in a paid product — requires a
+separate commercial license from Junhyuk Lee.
+
+Third-party components incorporated into deeper retain their original
+licenses; see [`docs/ATTRIBUTION.md`](docs/ATTRIBUTION.md).
