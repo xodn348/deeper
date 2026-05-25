@@ -110,6 +110,160 @@ Two modes:
 
 State persists in `runs/deeper/<run-id>/tree.json`. Resume with `/deeper resume <run-id>`. Full orchestrator spec in `skills/deeper/SKILL.md`.
 
+## A-phase fanout (experimental)
+
+The legacy A-phase produces Aₖ from a single `claude -p` call. The fanout
+A-phase replaces that single call with a **driver** that dispatches five
+parallel investigator subagents (one per angle), gates synthesis on every
+investigator reaching a terminal state, and force-kills stragglers past the
+deadline. The driver lives at `nodes/deeper/answer.sh`; its system prompt is
+`nodes/deeper/PROMPT.answer.md`.
+
+The Q-phase is unchanged — one cold `claude -p` (haiku) emits one question.
+Only the A-phase changes.
+
+### Round structure
+
+```
+Leader (loop.sh)
+│
+├── Round k
+│   │
+│   ├── Q-phase ──── ask.sh  (claude -p, haiku, --tools "")
+│   │                  └─ Qₖ  (one line)
+│   │
+│   ├── A-phase ──── answer.sh  (claude -p, opus,
+│   │                            --tools "Agent,Monitor,TaskGet,
+│   │                                     TaskList,TaskOutput,TaskStop")
+│   │     │
+│   │     ├── 1) Decompose Qₖ into 5 angles
+│   │     │      evidence · counterexample · boundary · mechanism · precedent
+│   │     │
+│   │     ├── 2) Dispatch Agent × 5 in a single message
+│   │     │      sub-A₁ (general-purpose, opus) — evidence
+│   │     │      sub-A₂ (Explore,        opus) — counterexample
+│   │     │      sub-A₃ (general-purpose, opus) — boundary
+│   │     │      sub-A₄ (general-purpose, opus) — mechanism
+│   │     │      sub-A₅ (general-purpose, opus) — precedent
+│   │     │
+│   │     ├── 3) Wait until every subagent terminates OR
+│   │     │      DEEPER_SUB_DEADLINE (default 180s) elapses
+│   │     │
+│   │     ├── 4) Termination gate — for each not-completed subagent:
+│   │     │      · diagnose reason (closed vocabulary, 6 categories)
+│   │     │      · append entry to runs/<id>/improvements.md
+│   │     │                     and nodes/deeper/IMPROVEMENTS.md
+│   │     │      · TaskStop the subagent
+│   │     │
+│   │     ├── 5a) ≥ DEEPER_KILL_THRESHOLD (default 3) force-kills?
+│   │     │       → emit "BLOCKED: N angle(s) force-killed", round fails
+│   │     │
+│   │     └── 5b) Otherwise synthesize completed paragraphs into one
+│   │             prose Aₖ. Force-killed angles appear inline as
+│   │             "[angle: <name> — collection failed: <reason>]".
+│   │
+│   └── Judge ──── judge.sh
+│
+└── Termination: passed | failed | hard_cap
+```
+
+### Data flow per round
+
+```
+   seed.md ─┐
+            ▼
+   ┌──────────────┐    Qₖ    ┌─────────────────────────────────┐    Aₖ    ┌──────┐
+   │   ask.sh     │ ───────▶ │  answer.sh  (A-driver, opus)    │ ───────▶ │Judge │
+   │ (cold,haiku) │          │                                 │          └──────┘
+   └──────────────┘          │   ┌─────────────────────────┐   │
+        ▲                    │   │  Agent × 5 (parallel)   │   │
+        │                    │   │  sub-A₁ … sub-A₅ (opus) │   │
+        │                    │   └────────────┬────────────┘   │
+        │                    │                │ outputs[5]     │
+        │                    │                ▼                │
+        │                    │   [ termination gate +          │
+        │                    │     improvements.md append +    │
+        │                    │     simple synthesis ]          │
+        │                    └────────────────┬────────────────┘
+        │                                     │
+        └─────── ancestor chain (Q₁,A₁,…,Qₖ₋₁,Aₖ₋₁) ◀
+```
+
+### Termination gate
+
+Before synthesis, every investigator must have reached a terminal state.
+Any subagent still running at the deadline is:
+
+1. Inspected via `TaskGet` / `TaskOutput` for last activity.
+2. Classified into a fixed reason vocabulary:
+   `context_limit` · `tool_loop` · `stuck_on_permission` · `network_timeout`
+   · `ambiguous_task` · `unknown`.
+3. Force-killed via `TaskStop`.
+4. Appended to `runs/<run-id>/improvements.md` AND
+   `nodes/deeper/IMPROVEMENTS.md` for later review and BANS promotion.
+
+If `force_killed.length >= DEEPER_KILL_THRESHOLD` (default 3) the driver
+emits `BLOCKED: …` to stdout and the round fails. Otherwise the survivors
+are synthesized into one prose answer with inline annotations for the
+failed angles.
+
+### Files
+
+```
+nodes/deeper/
+├── ask.sh                  # Q-phase (unchanged)
+├── answer.sh               # NEW — A-driver shell wrapper
+├── PROMPT.answer.md        # NEW — A-driver system prompt
+├── IMPROVEMENTS.md         # NEW — global force-kill accumulator
+├── PROMPT.md               # Q-subagent prompt (unchanged)
+├── BANS.md                 # binding lessons (unchanged)
+├── judge.sh                # unchanged
+└── render.sh               # unchanged
+
+runs/deeper/<run-id>/
+├── answer-r<round>.json    # verbatim JSON envelope from the A-driver
+└── improvements.md         # run-scoped force-kill log
+
+tests/
+└── test-answer-mock.sh     # NEW — 22 assertions, no LLM, $0
+```
+
+### Call accounting per round
+
+```
+ask.sh    : claude -p × 1   — haiku   (Q)
+answer.sh : claude -p × 1   — opus    (A-driver)
+            └─ Agent × 5    — opus    (investigators, parallel)
+─────────────────────────────────────────────────────
+total LLM calls / round  =  haiku × 1  +  opus × 6
+HARD_CAP = 12            →  worst-case haiku × 12 + opus × 72
+```
+
+### Tunables
+
+| Env var                       | Default | Purpose                                      |
+|-------------------------------|---------|----------------------------------------------|
+| `DEEPER_ANSWER_MODEL`         | `opus`  | A-driver model                               |
+| `DEEPER_SUB_MODEL`            | `opus`  | Investigator-subagent model                  |
+| `DEEPER_SUB_DEADLINE`         | `180`   | Per-subagent deadline (seconds)              |
+| `DEEPER_FANOUT`               | `5`     | Investigator count                           |
+| `DEEPER_KILL_THRESHOLD`       | `3`     | ≥ N force-kills → round emits `BLOCKED:`     |
+| `DEEPER_ANSWER_MOCK`          | unset   | If set, used verbatim as the JSON envelope (tests skip the real LLM call) |
+| `DEEPER_GLOBAL_IMPROVEMENTS`  | unset   | Override path for the global accumulator file (tests use this for isolation) |
+
+### Status
+
+Draft. `answer.sh` is callable standalone and fully covered by
+`tests/test-answer-mock.sh` (22 assertions, no LLM, $0).
+Integration into `harness/loop.sh` (so the existing ralph loop routes the
+A-phase through `answer.sh`) is the follow-up.
+
+Run the mock test suite:
+
+```bash
+bash tests/test-answer-mock.sh
+```
+
 After a drill, the skill suggests running `bash harness/feedback.sh deeper` to roll the run's violations into BANS — closing the self-improvement loop.
 
 ### Depth-first interview — bash CLI (no Claude Code)
