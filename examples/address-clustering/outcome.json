@@ -1,0 +1,9 @@
+{
+  "run_id": "deeper-20260525T201112Z",
+  "node": "deeper",
+  "status": "auto_cap",
+  "rounds": 50,
+  "final_score": 0.0,
+  "exit_reason": "hit_cap_round_50",
+  "violations_total": {}
+}
