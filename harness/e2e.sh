@@ -5,7 +5,8 @@ set -euo pipefail
 
 DEEPER="${DEEPER:-$HOME/code/deeper}"
 RUN_ID="deeper-e2e-$(date -u +%Y%m%dT%H%M%SZ)"
-RUN_DIR="$DEEPER/runs/deeper/$RUN_ID"
+DEEPER_HOME="${DEEPER_HOME:-$HOME/.deeper}"
+RUN_DIR="$DEEPER_HOME/runs/deeper/$RUN_ID"
 N_CAP="${N_CAP:-3}"
 SEED="${SEED:-Python의 GIL은 멀티스레딩 성능을 제한한다}"
 

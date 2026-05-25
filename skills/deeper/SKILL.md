@@ -9,9 +9,22 @@ You are the LAUNCHER and the orchestrator — the main Claude session runs the r
 
 This replaces the prior Agent / Explore-subagent dispatch path. Subagent boot was the dominant per-round cost (~30–60s/round); `claude -p --system-prompt … --tools "" --no-session-persistence` over session auth runs ~10s per call (~22s/round including model.py + judge.sh). The user's logged-in Claude Code session provides auth — no `ANTHROPIC_API_KEY` required, no per-call billing. See `docs/ADR-003-claude-print-orchestrator.md` for the decision rationale; `docs/ADR-002-main-session-orchestrator.md` remains the source for the single-turn-loop discipline (which this ADR keeps).
 
-## Repository assumption
+## Repository layout — code vs runtime
 
-This skill expects the `deeper` repo at `~/code/deeper/`. All paths below resolve from there.
+Two distinct locations. Do not conflate.
+
+- **Skill code** lives at `~/code/deeper/` (or wherever the repo is cloned). Referenced as `$DEEPER` in the scripts below. Read-only at runtime — the launcher never writes here.
+- **Runtime state** lives at `$DEEPER_HOME` (default `~/.deeper/`). All per-run directories, the cross-run launcher log, and any new artifacts go under `$DEEPER_HOME/runs/<node>/`. Set `DEEPER_HOME=/some/other/path` to relocate.
+
+Every path below resolves from one of these two roots. If you see `$HOME/code/deeper/runs/...` anywhere, that is legacy — replace with `$DEEPER_HOME/runs/...`.
+
+At the top of every Bash block in this skill, ensure:
+
+```bash
+DEEPER="${DEEPER:-$HOME/code/deeper}"
+DEEPER_HOME="${DEEPER_HOME:-$HOME/.deeper}"
+mkdir -p "$DEEPER_HOME/runs/deeper"
+```
 
 ## On invocation
 
@@ -30,8 +43,8 @@ This skill expects the `deeper` repo at `~/code/deeper/`. All paths below resolv
 
     ```bash
     STUCK=$(python3 -c "
-    import json, pathlib
-    base = pathlib.Path.home() / 'code' / 'deeper' / 'runs' / 'deeper'
+    import json, os, pathlib
+    base = pathlib.Path(os.environ.get('DEEPER_HOME', str(pathlib.Path.home() / '.deeper'))) / 'runs' / 'deeper'
     out = []
     for d in sorted(base.glob('deeper-*'), reverse=True)[:10]:
         if (d / 'outcome.json').exists(): continue
@@ -55,7 +68,7 @@ This skill expects the `deeper` repo at `~/code/deeper/`. All paths below resolv
 2. **Once you have the seed, set up the run state in the main repo (not in any worktree):**
    ```bash
    RUN_ID="deeper-$(date -u +%Y%m%dT%H%M%SZ)"
-   RUN_DIR="$HOME/code/deeper/runs/deeper/$RUN_ID"
+   RUN_DIR="$DEEPER_HOME/runs/deeper/$RUN_ID"
    mkdir -p "$RUN_DIR"
    printf '# Starting claim\n\n%s\n' "<seed-text>" > "$RUN_DIR/seed.md"
    : > "$RUN_DIR/state.md"
@@ -89,7 +102,7 @@ Execute in this order:
 
    ```
    Monitor(
-     command: "tail -F -n 0 \"$RUN_DIR/events.jsonl\" | python3 -u $HOME/code/deeper/nodes/deeper/format-events.py",
+     command: "tail -F -n 0 \"$RUN_DIR/events.jsonl\" | python3 -u $DEEPER/nodes/deeper/format-events.py",
      description: "deeper $RUN_ID events stream",
      persistent: true,
      timeout_ms: 3600000
@@ -122,7 +135,7 @@ Given the round number N:
 2. **Fire the Q subprocess** via `nodes/deeper/ask.sh haiku <sys-file> <user-file>`. The system prompt is PROMPT.md + BANS.md + role framing; the user-turn prompt is the ancestor chain + active claim + emit instruction. Both files are written to `$RUN_DIR/.q-sys-{N}.txt` and `$RUN_DIR/.q-user-{N}.txt` first (avoids shell-quoting pitfalls), then ask.sh is invoked and its stdout captured to `.q-raw-{N}.txt`.
 
    ```bash
-   DEEPER=$HOME/code/deeper
+   DEEPER="${DEEPER:-$HOME/code/deeper}"
    Q_SYS="$RUN_DIR/.q-sys-{N}.txt"
    Q_USER="$RUN_DIR/.q-user-{N}.txt"
    Q_RAW="$RUN_DIR/.q-raw-{N}.txt"
@@ -205,7 +218,7 @@ Given the round number N:
 
    ```bash
    MODEL_OUT=$(DEEPER_ANSWER_FILE=$RUN_DIR/.a-raw-{N}.txt SEED_FILE=$RUN_DIR/seed.md ROUND={N} \
-     python3 ~/code/deeper/nodes/deeper/model.py)
+     python3 $DEEPER/nodes/deeper/model.py)
    MODEL_BLOCKED=0
    case "$MODEL_OUT" in BLOCKED:*) MODEL_BLOCKED=1 ;; esac
    printf '\n--- round %d ---\n%s\n' {N} "$MODEL_OUT" >> "$RUN_DIR/state.md"
@@ -216,7 +229,7 @@ Given the round number N:
 5. **Run judge** — capture its exit code, which is the launcher loop's authoritative done/continue signal:
 
    ```bash
-   bash ~/code/deeper/nodes/deeper/judge.sh "$RUN_DIR" {N} || JUDGE_EXIT=$?
+   bash $DEEPER/nodes/deeper/judge.sh "$RUN_DIR" {N} || JUDGE_EXIT=$?
    JUDGE_EXIT=${JUDGE_EXIT:-0}
    ```
 
@@ -254,13 +267,13 @@ Triggered by the wake handler when:
 Steps:
 
 1. `TaskStop` the Monitor task id (read from `$RUN_DIR/.monitor-task-id` if not in context).
-2. Run `bash ~/code/deeper/nodes/deeper/render-dispatch.sh "$RUN_DIR"` and `bash ~/code/deeper/nodes/deeper/render.sh "$RUN_DIR"` — print both verbatim to chat. The user already saw rounds live via Monitor; this is the consolidated closing view.
+2. Run `bash $DEEPER/nodes/deeper/render-dispatch.sh "$RUN_DIR"` and `bash $DEEPER/nodes/deeper/render.sh "$RUN_DIR"` — print both verbatim to chat. The user already saw rounds live via Monitor; this is the consolidated closing view.
 3. Write `$RUN_DIR/outcome.json` with `run_id`, `node="deeper"`, `status`, `rounds` (max round in events), `final_score` (from last judge_result), `exit_reason`, `violations_total` (aggregated across all judge_result events).
 4. Append a terminal `run_finished` event: `{"type":"run_finished","status":STATUS,"rounds":N,"score":final_score}` to events.jsonl.
 5. **Exit handler — restore the launcher's original cwd** (per the Pre-flight transactional contract):
    ```bash
    ORIG_CWD="$(cat "$RUN_DIR/.orig-cwd" 2>/dev/null)"
-   python3 -c "import json,time; print(json.dumps({'ts':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'event':'launcher_exit','run_id':'$RUN_ID','status':'$STATUS','orig_cwd':'$ORIG_CWD'}))" >> "$HOME/code/deeper/runs/deeper/.launcher.jsonl"
+   python3 -c "import json,time; print(json.dumps({'ts':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'event':'launcher_exit','run_id':'$RUN_ID','status':'$STATUS','orig_cwd':'$ORIG_CWD'}))" >> "$DEEPER_HOME/runs/deeper/.launcher.jsonl"
    [ -n "$ORIG_CWD" ] && [ -d "$ORIG_CWD" ] && cd "$ORIG_CWD"
    ```
 6. Call `AskUserQuestion` to offer next-step actions. Options depend on status:
@@ -364,7 +377,7 @@ ANSWER_FILE="$RUN_DIR/.answer-${N}.txt"
 Then run model.py:
 
 ```bash
-cd ~/code/deeper && \
+cd "$DEEPER" && \
 DEEPER_ANSWER_FILE="$ANSWER_FILE" \
 SEED_FILE="$RUN_DIR/seed.md" \
 ROUND={N} \
@@ -378,7 +391,7 @@ This mutates `tree.json` in place. Capture the one-line stdout for state.md.
 
 ```bash
 printf '\n--- round %d ---\n%s\n' {N} "<model.py stdout>" >> "$RUN_DIR/state.md"
-bash ~/code/deeper/nodes/deeper/judge.sh "$RUN_DIR" {N}
+bash $DEEPER/nodes/deeper/judge.sh "$RUN_DIR" {N}
 ```
 
 The judge appends one `judge_result` event to `events.jsonl`.
@@ -396,7 +409,7 @@ tail -1 "$RUN_DIR/events.jsonl" | python3 -c 'import json,sys; e=json.loads(sys.
 
 1. Render the tree and show the user:
    ```bash
-   bash ~/code/deeper/nodes/deeper/render.sh "$RUN_DIR"
+   bash $DEEPER/nodes/deeper/render.sh "$RUN_DIR"
    ```
 
 2. Write `outcome.json`:
@@ -423,12 +436,12 @@ tail -1 "$RUN_DIR/events.jsonl" | python3 -c 'import json,sys; e=json.loads(sys.
 
    `STATUS` is `passed` (cursor=null + all closed), `aborted` (user STOP or BLOCKED), `hard_cap` (interactive, >20 rounds), or `auto_cap` (auto, ≥DEEPER_AUTO_CAP rounds).
 
-3. Suggest to the user: `Run \`bash ~/code/deeper/harness/feedback.sh deeper\` to update BANS.md based on this and recent runs — this is how the system self-improves.`
+3. Suggest to the user: `Run \`bash $DEEPER/harness/feedback.sh deeper\` to update BANS.md based on this and recent runs — this is how the system self-improves.`
 
 ## Resumption
 
 If invoked as `/deeper resume <run-id>`:
-- Set `RUN_ID` to the arg, `RUN_DIR=$HOME/code/deeper/runs/deeper/$RUN_ID`.
+- Set `RUN_ID` to the arg, `RUN_DIR=$DEEPER_HOME/runs/deeper/$RUN_ID`.
 - Verify `tree.json` exists; if not, tell the user and abort.
 - Read `.mode` to determine `MODE=auto|interactive`. If missing, default to `auto`.
 - Read `tree.json`, walk `cursor` → that is the active claim for the next round.

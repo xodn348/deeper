@@ -12,7 +12,7 @@
 #   fanout-loop.sh <seed-file> [run-id]
 #
 # Output:
-#   <repo>/runs/deeper/<run-id>/  — populated run directory.
+#   $DEEPER_HOME/runs/deeper/<run-id>/ (default ~/.deeper/runs/deeper/<run-id>/)  — populated run directory.
 #   Path printed to stdout on exit.
 #
 # Env:
@@ -36,7 +36,8 @@ RUN_ID="${2:-deeper-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 
 NODE_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$NODE_DIR/../.." && pwd)"
-RUN_DIR="$REPO_ROOT/runs/deeper/$RUN_ID"
+DEEPER_HOME="${DEEPER_HOME:-$HOME/.deeper}"
+RUN_DIR="$DEEPER_HOME/runs/deeper/$RUN_ID"
 
 ASK_SH="$NODE_DIR/ask.sh"
 ANSWER_SH="$NODE_DIR/answer.sh"

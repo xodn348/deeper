@@ -14,7 +14,8 @@ RUN_ID="${3:-${NODE}-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NODE_DIR="$REPO_ROOT/nodes/$NODE"
-RUN_DIR="$REPO_ROOT/runs/$NODE/$RUN_ID"
+DEEPER_HOME="${DEEPER_HOME:-$HOME/.deeper}"
+RUN_DIR="$DEEPER_HOME/runs/$NODE/$RUN_ID"
 
 [ -d "$NODE_DIR" ] || { echo "loop.sh: node not found: $NODE_DIR" >&2; exit 2; }
 [ -f "$NODE_DIR/PROMPT.md" ] || { echo "loop.sh: PROMPT.md missing" >&2; exit 2; }

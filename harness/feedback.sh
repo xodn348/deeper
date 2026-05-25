@@ -10,7 +10,8 @@ set -euo pipefail
 NODE="${1:?node name required}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NODE_DIR="$REPO_ROOT/nodes/$NODE"
-RUNS_DIR="$REPO_ROOT/runs/$NODE"
+DEEPER_HOME="${DEEPER_HOME:-$HOME/.deeper}"
+RUNS_DIR="$DEEPER_HOME/runs/$NODE"
 BANS_FILE="$NODE_DIR/BANS.md"
 
 WINDOW="${LESSONS_WINDOW:-5}"
