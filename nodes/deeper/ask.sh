@@ -29,6 +29,12 @@ USER_FILE="$3"
 [[ -r "$SYS_FILE"  ]] || { printf 'ask.sh: sys-file not readable: %s\n'  "$SYS_FILE"  >&2; exit 2; }
 [[ -r "$USER_FILE" ]] || { printf 'ask.sh: user-file not readable: %s\n' "$USER_FILE" >&2; exit 2; }
 
+# Tests / dry runs short-circuit the LLM call: emit DEEPER_ASK_MOCK verbatim.
+if [[ -n "${DEEPER_ASK_MOCK:-}" ]]; then
+  printf '%s' "$DEEPER_ASK_MOCK"
+  exit 0
+fi
+
 # --system-prompt replaces the default CC system prompt entirely → no plugin /
 # CLAUDE.md / MCP boot baggage. --tools "" disables every tool (this call is
 # pure text in / text out). --no-session-persistence prevents the call from

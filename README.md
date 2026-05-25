@@ -120,52 +120,8 @@ deadline. The driver lives at `nodes/deeper/answer.sh`; its system prompt is
 `nodes/deeper/PROMPT.answer.md`.
 
 The Q-phase is unchanged — one cold `claude -p` (haiku) emits one question.
-Only the A-phase changes.
-
-### Round structure
-
-```
-Leader (loop.sh)
-│
-├── Round k
-│   │
-│   ├── Q-phase ──── ask.sh  (claude -p, haiku, --tools "")
-│   │                  └─ Qₖ  (one line)
-│   │
-│   ├── A-phase ──── answer.sh  (claude -p, opus,
-│   │                            --tools "Agent,Monitor,TaskGet,
-│   │                                     TaskList,TaskOutput,TaskStop")
-│   │     │
-│   │     ├── 1) Decompose Qₖ into 5 angles
-│   │     │      evidence · counterexample · boundary · mechanism · precedent
-│   │     │
-│   │     ├── 2) Dispatch Agent × 5 in a single message
-│   │     │      sub-A₁ (general-purpose, opus) — evidence
-│   │     │      sub-A₂ (Explore,        opus) — counterexample
-│   │     │      sub-A₃ (general-purpose, opus) — boundary
-│   │     │      sub-A₄ (general-purpose, opus) — mechanism
-│   │     │      sub-A₅ (general-purpose, opus) — precedent
-│   │     │
-│   │     ├── 3) Wait until every subagent terminates OR
-│   │     │      DEEPER_SUB_DEADLINE (default 180s) elapses
-│   │     │
-│   │     ├── 4) Termination gate — for each not-completed subagent:
-│   │     │      · diagnose reason (closed vocabulary, 6 categories)
-│   │     │      · append entry to runs/<id>/improvements.md
-│   │     │                     and nodes/deeper/IMPROVEMENTS.md
-│   │     │      · TaskStop the subagent
-│   │     │
-│   │     ├── 5a) ≥ DEEPER_KILL_THRESHOLD (default 3) force-kills?
-│   │     │       → emit "BLOCKED: N angle(s) force-killed", round fails
-│   │     │
-│   │     └── 5b) Otherwise synthesize completed paragraphs into one
-│   │             prose Aₖ. Force-killed angles appear inline as
-│   │             "[angle: <name> — collection failed: <reason>]".
-│   │
-│   └── Judge ──── judge.sh
-│
-└── Termination: passed | failed | hard_cap
-```
+Only the A-phase changes. The end-to-end Q→A drill is wrapped by
+`nodes/deeper/fanout-loop.sh`.
 
 ### Data flow per round
 
@@ -211,21 +167,28 @@ failed angles.
 
 ```
 nodes/deeper/
-├── ask.sh                  # Q-phase (unchanged)
-├── answer.sh               # NEW — A-driver shell wrapper
-├── PROMPT.answer.md        # NEW — A-driver system prompt
-├── IMPROVEMENTS.md         # NEW — global force-kill accumulator
-├── PROMPT.md               # Q-subagent prompt (unchanged)
-├── BANS.md                 # binding lessons (unchanged)
-├── judge.sh                # unchanged
-└── render.sh               # unchanged
+├── ask.sh                  # Q-phase (DEEPER_ASK_MOCK env added for tests)
+├── answer.sh               # A-driver shell wrapper
+├── fanout-loop.sh          # full Q→A drill loop using ask.sh + answer.sh
+├── PROMPT.answer.md        # A-driver system prompt
+├── IMPROVEMENTS.md         # global force-kill accumulator
 
 runs/deeper/<run-id>/
+├── seed.md
+├── ancestors.md            # running root + (Q₁/A₁ … Qₖ/Aₖ) chain
+├── state.md
+├── events.jsonl            # round_start / question_emitted / answer_emitted /
+│                           #   subagent_completed / subagent_force_killed /
+│                           #   loop_done / loop_aborted
+├── q-r<round>.txt          # raw Qₖ
+├── a-r<round>.txt          # raw Aₖ (synthesis or BLOCKED line)
 ├── answer-r<round>.json    # verbatim JSON envelope from the A-driver
-└── improvements.md         # run-scoped force-kill log
+├── improvements.md         # run-scoped force-kill log
+└── outcome.json            # final {status, rounds, exit_reason}
 
 tests/
-└── test-answer-mock.sh     # NEW — 22 assertions, no LLM, $0
+├── test-answer-mock.sh        # 22 assertions on answer.sh in isolation
+└── test-fanout-loop-mock.sh   # 31 assertions on the full Q→A loop
 ```
 
 ### Call accounting per round
@@ -243,26 +206,43 @@ HARD_CAP = 12            →  worst-case haiku × 12 + opus × 72
 
 | Env var                       | Default | Purpose                                      |
 |-------------------------------|---------|----------------------------------------------|
+| `DEEPER_Q_MODEL`              | `haiku` | Q-subagent model                             |
 | `DEEPER_ANSWER_MODEL`         | `opus`  | A-driver model                               |
 | `DEEPER_SUB_MODEL`            | `opus`  | Investigator-subagent model                  |
 | `DEEPER_SUB_DEADLINE`         | `180`   | Per-subagent deadline (seconds)              |
 | `DEEPER_FANOUT`               | `5`     | Investigator count                           |
 | `DEEPER_KILL_THRESHOLD`       | `3`     | ≥ N force-kills → round emits `BLOCKED:`     |
-| `DEEPER_ANSWER_MOCK`          | unset   | If set, used verbatim as the JSON envelope (tests skip the real LLM call) |
+| `DEEPER_HARD_CAP`             | `12`    | Max rounds per drill                         |
+| `DEEPER_ASK_MOCK`             | unset   | If set, `ask.sh` emits this verbatim (tests) |
+| `DEEPER_ANSWER_MOCK`          | unset   | If set, `answer.sh` emits this verbatim JSON envelope (tests) |
 | `DEEPER_GLOBAL_IMPROVEMENTS`  | unset   | Override path for the global accumulator file (tests use this for isolation) |
+
+### Run the full fanout drill
+
+```bash
+cd ~/code/deeper
+bash nodes/deeper/fanout-loop.sh nodes/deeper/sample-seed.md my-fanout-run
+bash nodes/deeper/render.sh           runs/deeper/my-fanout-run   # tree view (if model.py path)
+bash nodes/deeper/render-dispatch.sh  runs/deeper/my-fanout-run   # dispatch view
+```
+
+Run the mock test suites (no LLM, $0):
+
+```bash
+bash tests/test-answer-mock.sh        # 22 assertions on answer.sh
+bash tests/test-fanout-loop-mock.sh   # 31 assertions on the full Q→A loop
+```
 
 ### Status
 
-Draft. `answer.sh` is callable standalone and fully covered by
-`tests/test-answer-mock.sh` (22 assertions, no LLM, $0).
-Integration into `harness/loop.sh` (so the existing ralph loop routes the
-A-phase through `answer.sh`) is the follow-up.
+Draft. `fanout-loop.sh` orchestrates the full Q→A drill end-to-end using
+`ask.sh` for Q-phase and `answer.sh` for A-phase. Termination conditions:
+`STOP` / `BEDROCK:` in the answer, two consecutive `BLOCKED:` rounds,
+or `DEEPER_HARD_CAP`.
 
-Run the mock test suite:
-
-```bash
-bash tests/test-answer-mock.sh
-```
+Integration with the existing `/deeper` slash command orchestrator (see
+`skills/deeper/SKILL.md`) is a follow-up — for now the auto-mode orchestrator
+still spawns the legacy single-A-subagent per round.
 
 After a drill, the skill suggests running `bash harness/feedback.sh deeper` to roll the run's violations into BANS — closing the self-improvement loop.
 
