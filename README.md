@@ -6,6 +6,25 @@ A self-improving [ralph loop](https://ghuntley.com/ralph/) framework. One harnes
 
 The marquee node is **deeper** itself — a depth-first interview that drills ONE claim to its bedrock (first principle / axiom / source of truth), exposed as a Claude Code slash command. Every existing interview skill (`superpowers:brainstorming`, `omx:deep-interview`, `pegasus-init`, `gstack:office-hours`, `ouroboros`) is built to *keep breadth* and fight tunneling. `deeper` does the opposite — it commits to one claim and refuses to widen until that claim reaches bedrock. The reference verification node, `commit-msg`, runs autonomously against a deterministic mock so the self-improvement loop is testable for free.
 
+## Quick start
+
+```bash
+# 1. clone
+git clone https://github.com/xodn348/deeper.git ~/code/deeper
+
+# 2. install the Claude Code skill (one-time symlink)
+mkdir -p ~/.claude/skills
+ln -s ~/code/deeper/skills/deeper ~/.claude/skills/deeper
+```
+
+Then, inside Claude Code:
+
+```
+/deeper why does our checkout funnel keep regressing?
+```
+
+That's it. The drill runs in a worktree-isolated subagent, defaults to ~10 rounds (override with `DEEPER_AUTO_CAP=50 /deeper …`), and streams live progress. State lands in `~/.deeper/runs/deeper/<run-id>/` — resume any run with `/deeper resume <run-id>`. Real worked traces in [`examples/`](./examples/).
+
 ## The framework — ralph + structured feedback
 
 A ralph loop re-injects the same prompt every iteration with fresh context. This repo wraps that with a feedback step that reads structured logs and promotes recurring rule violations to a binding-lessons file. Next run starts smarter without anyone editing the prompt by hand.
