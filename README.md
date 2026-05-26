@@ -267,6 +267,17 @@ MODEL_CMD="claude -p" bash harness/meta-loop.sh commit-msg nodes/commit-msg/samp
 
 Anything that reads a prompt on stdin and writes the response on stdout works — `gemini`, `codex exec`, etc.
 
+## Examples — recorded runs
+
+Two worked drills with full traces (tree, events, digest, outcome).
+
+| Run | Seed | Outcome | What's interesting |
+|---|---|---|---|
+| [`examples/address-clustering`](./examples/address-clustering/) | "find a creative way to do address clustering well" | 50R · `auto_cap` · 0 violations | Practical → empirical → epistemic → meta-epistemic ladder; surfaces 7 actionable clustering ideas en route to limits |
+| [`examples/ecdsa-drift`](./examples/ecdsa-drift/) | "solve ECDSA cryptocraphy scheme" | 50R · `auto_cap` · 1 violation | Cautionary case — math reduction (R1–R19) bottoms out cleanly at ZFC, then drifts into pure epistemology. Three `BEDROCK:<cat>` declarations failed to terminate the drill (real bug in `model.py`'s closure logic) |
+
+Each folder contains `README.md` (phase-by-phase summary), `digest-r1-r50.md` (all Q/A pairs), `tree.json`, `events.jsonl`, `outcome.json`.
+
 ## Repo layout
 
 ```
