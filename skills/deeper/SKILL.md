@@ -1,6 +1,6 @@
 ---
 name: deeper
-description: Depth-first interview that drills ONE claim to its bedrock (first principle / axiom / source of truth) via per-round cold `claude -p` subprocess calls (Q=haiku, A=sonnet) over session auth — no ANTHROPIC_API_KEY required. Use when the user wants to ROOT-CAUSE something rather than survey it; when the question is "why is this REALLY the case?" not "what are the options?"; or when locking down a single decision's foundation before further work. Inverts the breadth-keeper guards found in superpowers:brainstorming, omx:deep-interview, ouroboros.
+description: Depth-first interview that drills ONE claim to its bedrock (first principle / axiom / source of truth) via per-round cold `claude -p` subprocess calls (Q=opus, A=opus) over session auth — no ANTHROPIC_API_KEY required. Use when the user wants to ROOT-CAUSE something rather than survey it; when the question is "why is this REALLY the case?" not "what are the options?"; or when locking down a single decision's foundation before further work. Inverts the breadth-keeper guards found in superpowers:brainstorming, omx:deep-interview, ouroboros.
 ---
 
 # deeper — depth-first interview (Claude Code edition)
@@ -132,7 +132,7 @@ Given the round number N:
 
 1. **Build the ancestor chain**: read `$RUN_DIR/tree.json` (if exists), walk `cursor`, collect claim text from root to the active claim. On round 1 tree.json does not yet exist — active claim IS the seed.
 
-2. **Fire the Q subprocess** via `nodes/deeper/ask.sh haiku <sys-file> <user-file>`. The system prompt is PROMPT.md + BANS.md + role framing; the user-turn prompt is the ancestor chain + active claim + emit instruction. Both files are written to `$RUN_DIR/.q-sys-{N}.txt` and `$RUN_DIR/.q-user-{N}.txt` first (avoids shell-quoting pitfalls), then ask.sh is invoked and its stdout captured to `.q-raw-{N}.txt`.
+2. **Fire the Q subprocess** via `nodes/deeper/ask.sh opus <sys-file> <user-file>`. The system prompt is PROMPT.md + BANS.md + role framing; the user-turn prompt is the ancestor chain + active claim + emit instruction. Both files are written to `$RUN_DIR/.q-sys-{N}.txt` and `$RUN_DIR/.q-user-{N}.txt` first (avoids shell-quoting pitfalls), then ask.sh is invoked and its stdout captured to `.q-raw-{N}.txt`.
 
    ```bash
    DEEPER="${DEEPER:-$HOME/code/deeper}"
@@ -162,14 +162,14 @@ Given the round number N:
      echo
      echo "Output exactly ONE line: the depth question."
    } > "$Q_USER"
-   bash "$DEEPER/nodes/deeper/ask.sh" haiku "$Q_SYS" "$Q_USER" > "$Q_RAW"
+   bash "$DEEPER/nodes/deeper/ask.sh" opus "$Q_SYS" "$Q_USER" > "$Q_RAW"
    ```
 
    Then emit a `question_emitted` event to `$RUN_DIR/events.jsonl` with `question` (last non-empty line of `Q_RAW`), `raw_chars`, `raw_lines`.
 
-   Model escalation: pass `sonnet` to ask.sh instead of `haiku` only if BANS.md flags repeated G-violations for haiku on this claim type; `opus` for genuinely cryptic abstract claims.
+   Model default: `opus` (the user's standing preference — depth questions must be smart). Downgrade to `sonnet`/`haiku` only if BANS.md explicitly flags a trivial claim type where the cheaper model holds question quality.
 
-3. **Fire the A subprocess** via `nodes/deeper/ask.sh sonnet <sys-file> <user-file>` (same pattern as Q, different model + different system prompt — A1–A5 guards instead of G1–G7).
+3. **Fire the A subprocess** via `nodes/deeper/ask.sh opus <sys-file> <user-file>` (same pattern as Q, different system prompt — A1–A5 guards instead of G1–G7).
 
    ```bash
    A_SYS="$RUN_DIR/.a-sys-{N}.txt"
@@ -201,12 +201,12 @@ Given the round number N:
      echo
      echo "No preamble. No \"Answer:\". No reasoning about which option you picked."
    } > "$A_USER"
-   bash "$DEEPER/nodes/deeper/ask.sh" sonnet "$A_SYS" "$A_USER" > "$A_RAW"
+   bash "$DEEPER/nodes/deeper/ask.sh" opus "$A_SYS" "$A_USER" > "$A_RAW"
    ```
 
    **Stall self-heal** — if `$A_RAW` is empty or whitespace-only:
      i.   Append event `{"type":"stall","round":N,"reason":"empty_a_sonnet"}` to events.jsonl.
-     ii.  Re-fire ask.sh with `opus` instead of `sonnet`. Overwrite `.a-raw-{N}.txt`.
+     ii.  Re-fire ask.sh `opus` once more as a fresh retry. Overwrite `.a-raw-{N}.txt`.
      iii. If still empty:
           - Append event `{"type":"stall","round":N,"reason":"empty_a_after_opus_retry"}`.
           - Overwrite `.a-raw-{N}.txt` with literal `STOP` (triggers model.py's BLOCKED path).
@@ -310,9 +310,9 @@ cat "$RUN_DIR/tree.json" 2>/dev/null
 
 If tree.json does not exist (first round), the active claim IS the seed. Otherwise, walk `tree.cursor` from root and read that node's `claim` field as the active claim. Build the ancestor chain by walking from root to cursor.
 
-### Step 2 — Fire the Q subprocess (`ask.sh haiku` — opus only for cryptic abstract claims)
+### Step 2 — Fire the Q subprocess (`ask.sh opus` — the standing default)
 
-Use the same Q-call pattern as the auto-mode round handler (see "### Round handler" step 2 above). Write `.q-sys-{N}.txt` + `.q-user-{N}.txt`, run `bash $DEEPER/nodes/deeper/ask.sh haiku <sys> <user> > "$RAW_FILE"`.
+Use the same Q-call pattern as the auto-mode round handler (see "### Round handler" step 2 above). Write `.q-sys-{N}.txt` + `.q-user-{N}.txt`, run `bash $DEEPER/nodes/deeper/ask.sh opus <sys> <user> > "$RAW_FILE"`.
 
 ```bash
 RAW_FILE="$RUN_DIR/.q-raw-${N}.txt"
@@ -465,7 +465,7 @@ If invoked as `/deeper resume` with NO run-id, call `AskUserQuestion` to pick fr
 
 ## RED FLAGS — refuse these in YOURSELF (LAUNCHER)
 
-The launcher orchestrates the round loop itself, but it NEVER produces content — Q and A always come from fresh `claude -p` subprocesses (ask.sh haiku for Q, ask.sh sonnet for A).
+The launcher orchestrates the round loop itself, but it NEVER produces content — Q and A always come from fresh `claude -p` subprocesses (ask.sh opus for Q, ask.sh opus for A).
 
 | Thought | Reality |
 |---|---|
