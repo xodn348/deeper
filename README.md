@@ -59,33 +59,36 @@ This per-round fan-out is **why the drill runs on the Workflow runtime rather th
 
 Every round runs in **cold context** — a fresh agent that sees only the prompt + lessons + ancestor chain, never the running session. That is what holds depth-first discipline across many rounds without the model rationalizing its own earlier reasoning.
 
-### Worked example — rounds 1→4 (real run)
+### Worked example — rounds 1→4 (real fan-out run)
 
-A live drill on seed *"why does our checkout funnel keep regressing?"* (`cap 4`). The cursor descends exactly one level per round; each claim is strictly sharper than its parent, and the drill never widens into sibling topics:
+A live drill on seed *"why does our checkout funnel keep regressing?"* (`cap 4`, `answer_fanout 3`). Each round fans out 3 candidate answers in parallel from distinct angles (mechanism · hidden-assumption · boundary) and a judge keeps the deepest. Only the judge's pick is shown; the cursor descends exactly one level per round and never widens into sibling topics:
 
 ```
 ● seed: why does our checkout funnel keep regressing?
-└─ R1 ▸ depth 0→1  [descend]
-│    Fixes patch the broken funnel state but never add a regression GUARD (a test/
-│    alert that pins the corrected behavior and fails the build), so the offending
-│    change re-enters on a later deploy undetected.
-└─ R2 ▸ depth 1→2  [descend]
-│    The reintroducing deploys are unrelated changes by other authors touching shared
-│    checkout code — not reverts. The fix left no executable artifact saying "this path
-│    must stay corrected"; each fix was scoped as incident-closure, so a pinning test
-│    was never in its definition of done.
+└─ R1 ▸ depth 0→1  [descend · judge kept the boundary candidate]
+│    "Keeps regressing" is largely a measurement artifact: conversion is ONE aggregate
+│    rate over an uncontrolled, shifting traffic mix, so every change in traffic
+│    composition reads as a fresh regression — one no checkout-code fix can touch,
+│    because it lives in the unsegmented denominator.
+└─ R2 ▸ depth 1→2  [descend · judge kept the hidden-assumption candidate]
+│    For that to be a real trend and not re-read noise, the period-over-period drops must
+│    clear the rate's own sampling band — and the drill had silently assumed someone
+│    computed it. Dashboards plot bare point estimates (no CI, no control limits, no MDE),
+│    so "keeps" launders within-noise wiggles, narrated only when the number fell.
 └─ R3 ▸ depth 2→3  [descend]
-│    Concrete: PR #4821 "Promo banner: collapse on scroll" hoisted <Banner> above
-│    <PaymentStep>, re-firing `checkout_step_viewed` before state hydrated. The real
-│    blocker wasn't framing — it was no cheap seam to assert against: the behavior is
-│    emergent (render order + event timing + hydration race), observable only end-to-end.
+│    "The team lacks the instrument" rests on an unearned prior about who authored the
+│    chart and which statistical idiom they default to — present-but-ignored and
+│    never-instantiated are different root causes, asserted without verifying ownership.
 └─ R4 ▸ depth 3→4  [descend]
-     The fix encoded ONE ordering invariant (emit only after PaymentStep hydrates) but
-     wrote it down NOWHERE a PR author or CI could see — no comment, assertion, doc, or
-     named function. The missing guard is downstream of a missing *named invariant*.
+     The authored-vs-inherited framing itself breaks: the funnel line wasn't authored —
+     it was instantiated from a BI tool whose default template ships no band / UCL / MDE.
+     So the bedrock is structural, not personal: missing statistical instrumentation is
+     the path of least resistance in any general-purpose BI tool — zero competence to
+     produce, positive effort to escape — so its presence says ~nothing about anyone's
+     skill, only whether someone had reason to pay the escape cost.
 ```
 
-Hit `auto_cap` at round 4 (cap was 4); R4's "missing named invariant" is the next bedrock candidate. Each line is the answer the drill descended on that round — under the per-round fan-out it is the judge's pick from `answer_fanout` parallel candidates. It stayed on one thread the entire way down.
+Hit `auto_cap` at round 4. The run was **22 agents** — Bootstrap + Evolve (2) plus, *per round*, one Q + three parallel candidate A's + one judge (4 × 5). Notice where it landed: the fan-out + judge pushed the drill past "ship a fix / add a guard" into the **epistemics of the metric itself** — a sharper descent than a single answerer reached on the same seed.
 
 ### Two fan-outs — generate, then verify
 
