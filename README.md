@@ -12,11 +12,11 @@ deeper runs as a **native dynamic workflow** ([`workflows/deeper-native.js`](./w
 # 1. clone
 git clone https://github.com/xodn348/deeper.git ~/code/deeper
 
-# 2. install (one-time symlinks): the slash command + the workflow it runs
-mkdir -p ~/.claude/skills ~/.claude/workflows
-ln -s ~/code/deeper/skills/deeper            ~/.claude/skills/deeper
-ln -s ~/code/deeper/workflows/deeper-native.js ~/.claude/workflows/deeper-native.js
+# 2. install — wires /deeper + the deeper-native workflow into Claude Code
+bash ~/code/deeper/install.sh
 ```
+
+`install.sh` is idempotent (re-run any time) and path-agnostic (resolves the repo from its own location, honors `$CLAUDE_CONFIG_DIR`). It symlinks the `/deeper` skill and the `deeper-native` workflow into `~/.claude/` and verifies both resolve.
 
 Then, inside Claude Code, just use the slash command:
 
@@ -43,23 +43,51 @@ Full principle, architecture, `args` table, philosophy, and a *"how this differs
 
 ## Mechanism — one drill, many rounds
 
+The cursor is always the DFS-deepest open leaf. Each round:
+
+1. **Find** `cursor` — the deepest open leaf.
+2. **Build the ancestor chain** — root → … → cursor (never siblings, never the whole tree).
+3. **Cold Q agent** generates ONE depth question from the prompt + binding lessons + ancestor chain.
+4. **Cold A agent** answers with a **schema-typed** verdict: `descend | bedrock | branch | stop`.
+5. **If the answer claims `bedrock`**, the adversarial gate fires (below) before the leaf may close.
+6. **Mutate the tree**: `descend` → append child, cursor goes deeper · `bedrock` → close leaf, pop to next open · `branch` → append sibling, jump.
+7. **Done** when no open leaf remains (every leaf closed at a *verified* bedrock), or on `spinning` / `cap`.
+
+Every round runs in **cold context** — a fresh agent that sees only the prompt + lessons + ancestor chain, never the running session. That is what holds depth-first discipline across many rounds without the model rationalizing its own earlier reasoning.
+
+### Worked example — rounds 1→4 (real run)
+
+A live drill on seed *"why does our checkout funnel keep regressing?"* (`cap 4`). The cursor descends exactly one level per round; each claim is strictly sharper than its parent, and the drill never widens into sibling topics:
+
 ```
-●  "Why does X?"
-└── ● "because A"
-    ├── ● "A traces to design choice"
-    │   └── ◆ [BEDROCK: prior-decision]
-    └── ● "also: time pressure"
-        └── ◆ [BEDROCK: stated-value]
+● seed: why does our checkout funnel keep regressing?
+└─ R1 ▸ depth 0→1  [descend]
+│    Fixes patch the broken funnel state but never add a regression GUARD (a test/
+│    alert that pins the corrected behavior and fails the build), so the offending
+│    change re-enters on a later deploy undetected.
+└─ R2 ▸ depth 1→2  [descend]
+│    The reintroducing deploys are unrelated changes by other authors touching shared
+│    checkout code — not reverts. The fix left no executable artifact saying "this path
+│    must stay corrected"; each fix was scoped as incident-closure, so a pinning test
+│    was never in its definition of done.
+└─ R3 ▸ depth 2→3  [descend]
+│    Concrete: PR #4821 "Promo banner: collapse on scroll" hoisted <Banner> above
+│    <PaymentStep>, re-firing `checkout_step_viewed` before state hydrated. The real
+│    blocker wasn't framing — it was no cheap seam to assert against: the behavior is
+│    emergent (render order + event timing + hydration race), observable only end-to-end.
+└─ R4 ▸ depth 3→4  [descend]
+     The fix encoded ONE ordering invariant (emit only after PaymentStep hydrates) but
+     wrote it down NOWHERE a PR author or CI could see — no comment, assertion, doc, or
+     named function. The missing guard is downstream of a missing *named invariant*.
 ```
 
-Per round:
+Hit `auto_cap` at round 4 (cap was 4); R4's "missing named invariant" is the next bedrock candidate. The whole drill was **10 agents**: Bootstrap + Evolve (2) plus one cold **Q + A** per round (4 × 2). It stayed on one thread the entire way down.
 
-1. Find `cursor` — the DFS-deepest open leaf.
-2. Build the **ancestor chain** — root → … → cursor. NOT the whole tree, NOT siblings.
-3. A cold agent generates ONE depth question from the prompt + binding lessons + ancestor chain.
-4. A second cold agent answers with a **schema-typed** verdict: `descend` `|` `bedrock` `|` `branch` `|` `stop`.
-5. Mutate the tree: **descend** → append child, cursor goes deeper · **bedrock** → close leaf, pop · **branch** → append sibling, jump.
-6. Done when there is no open leaf (every leaf closed at a bedrock), or on `spinning` / `cap`.
+### The fan-out — the adversarial bedrock gate
+
+A leaf is **not** allowed to close on the A agent's say-so. When (and only when) an answer claims `bedrock`, `verify_fanout` skeptic agents — default 3 — fan out in **`parallel()`**, each trying to *refute* the claim with one more honest "why?". Majority-refute rejects the bedrock and forces one more descent into the strongest skeptic's deeper claim. This is the single place breadth enters — in service of depth, never to widen the thread.
+
+So the fan-out is a *verification* step at the bottom of the chain, not a per-round answer tournament: a normal round is one cold Q + one cold A, and the skeptics spin up only at a candidate bedrock. (In the run above, no answer claimed bedrock, which is exactly why the agent count is `2 + 4×2 = 10` with zero skeptics.)
 
 ### How binding lessons shape paths
 
