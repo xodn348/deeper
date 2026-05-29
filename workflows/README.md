@@ -24,7 +24,7 @@ Every other interview framework (`brainstorming`, `deep-interview`, `office-hour
 Each round rebuilds the agent prompt from scratch: `PROMPT + bans + ancestorChain(cursor)`. The script holds the entire history in memory — and **deliberately does not pass it forward.** That restraint *is* ralph. `agent()` is natively cold (a fresh subagent, no session/keychain residue), so the discipline is to keep the *prompt* minimal, not the process.
 
 ### 2. DFS state machine in pure JS
-`nodes/deeper/drill-core.mjs` ports `model.py`'s `find_next_open_leaf` + the three-way mutation (descend / bedrock / branch) and `judge.sh`'s "done = no open leaves" into pure functions. The tree lives in a JS variable — it *is* the single source of truth. No `tree.json` round-trip inside the loop, no exit-code signalling.
+`workflows/drill-core.mjs` ports `model.py`'s `find_next_open_leaf` + the three-way mutation (descend / bedrock / branch) and `judge.sh`'s "done = no open leaves" into pure functions. The tree lives in a JS variable — it *is* the single source of truth. No `tree.json` round-trip inside the loop, no exit-code signalling.
 
 ### 3. Schema-typed termination — the bug fix
 deeper's live A-answer → `model.py` contract is a brittle string-prefix match (`answer.startswith("BEDROCK:")`). An autonomous answerer that buries `BEDROCK:` in prose is never recognized, so the drill never closes and drifts to the cap — this actually happened: `examples/ecdsa-drift` is a 50-deep linear chain, zero leaves closed, cursor never null.
@@ -43,14 +43,14 @@ Before a leaf is closed, `verify_fanout` skeptics run in **`parallel()`**, each 
 ### 5. Self-improvement across runs (the ralph flywheel — automatic)
 Every drill is bracketed by two store phases. **Bootstrap** (start) reads the persisted store and loads accumulated lessons into the cold prompt. **Evolve** (end) records this run's violations to the run log, recomputes which violations recur across runs, and promotes the recurring ones to the binding-lessons file — so the *next* drill starts smarter without anyone editing a prompt by hand. After every session/question, the algorithm updates itself.
 
-Promotion is `promoteBans()` — a pure function mirroring `harness/feedback.sh`: count the **distinct runs** (within a sliding `window`, default 5) in which each violation key appears; promote any key hitting `threshold` (default 2), idempotently, with a rationale. It is computed in the script body (deterministic, unit-tested); **agents only do the filesystem I/O** (same split as deeper's `model.py` = pure logic, shell = I/O). The store lives at `~/.deeper/runs/deeper-native/`:
+Promotion is `promoteBans()` — a pure function mirroring `legacy/harness/feedback.sh`: count the **distinct runs** (within a sliding `window`, default 5) in which each violation key appears; promote any key hitting `threshold` (default 2), idempotently, with a rationale. It is computed in the script body (deterministic, unit-tested); **agents only do the filesystem I/O** (same split as deeper's `model.py` = pure logic, shell = I/O). The store lives at `~/.deeper/runs/deeper-native/`:
 
 - `runlog.jsonl` — one line per run: `{run_id, violations}`
 - `bans.json` — the currently-promoted lessons `[{key, rationale}]`, reloaded by the next Bootstrap
 - `BANS.md` — human-readable view
 - `<run-id>/{outcome.json, tree.txt}` — each run's result
 
-This closes the loop deeper's framework is built around (`harness/meta-loop.sh` + `feedback.sh` + `BANS.md`) inside a single self-contained workflow: **drill → record → promote → (next drill) load**. A violation has to recur in `threshold` distinct runs before it becomes a binding lesson, so the flywheel visibly engages after repeated drills, not on the first one.
+This closes the loop deeper's framework is built around (`legacy/harness/meta-loop.sh` + `feedback.sh` + `BANS.md`) inside a single self-contained workflow: **drill → record → promote → (next drill) load**. A violation has to recur in `threshold` distinct runs before it becomes a binding lesson, so the flywheel visibly engages after repeated drills, not on the first one.
 
 ---
 
@@ -83,11 +83,11 @@ This closes the loop deeper's framework is built around (`harness/meta-loop.sh` 
    ~/.deeper/runs/deeper-native/   runlog.jsonl · bans.json · BANS.md · <id>/{outcome,tree}
         ▲ Bootstrap reads ─────────────────────────── Evolve writes ┘   (the ralph flywheel)
 
-   nodes/deeper/drill-core.mjs  ── canonical pure engine (CORE block) ──┐
+   workflows/drill-core.mjs     ── canonical pure engine (CORE block) ──┐
    tests/test-drill-core.mjs    ── $0 fixtures + sync-guard ────────────┘  (59 assertions)
 ```
 
-- **`nodes/deeper/drill-core.mjs`** — canonical pure engine: the DFS state machine, `runDrill`, and `promoteBans` (the feedback/promotion logic). No agents, no FS, no clock. Exported for tests.
+- **`workflows/drill-core.mjs`** — canonical pure engine: the DFS state machine, `runDrill`, and `promoteBans` (the feedback/promotion logic). No agents, no FS, no clock. Exported for tests.
 - **`workflows/deeper-native.js`** — the workflow. Inlines a verbatim copy of the engine's `CORE` block (workflow scripts are sandboxed and cannot `import` local files), then adds: a **Bootstrap** agent (reads the store), the agent-driven `answerFn`, the `parallel()` `verifyFn`, and an **Evolve** agent (records the run, promotes recurring violations, persists). The script body itself never touches the filesystem.
 - **`tests/test-drill-core.mjs`** — 25 fixtures over the pure engine (feeding scripted answers in place of `agent()`, plus `promoteBans` promotion cases), and a **sync-guard** asserting the workflow's inlined `CORE` block is byte-identical (whitespace-normalized) to the module. 59 assertions, $0, no LLM.
 
@@ -148,5 +148,5 @@ In short: a vanilla workflow is an *orchestrator of independent work*; `deeper-n
 ## Scope — what this is and isn't
 
 - **Is:** the autonomous drill (deeper's default `auto` mode) as a background workflow. Agents stand in for the respondent; reliable termination; observable via `/workflows`; persisted for inspection.
-- **Isn't:** the interactive `/deeper interactive` mode. A background workflow takes no mid-run user input, so the human-answers-each-round path stays in the skill (`skills/deeper/SKILL.md`).
+- **Isn't:** the interactive `/deeper interactive` mode. A background workflow takes no mid-run user input, so the human-answers-each-round path stays in the skill (`legacy/skills/deeper/SKILL.md`).
 - **Trade vs the skill:** `agent()` bills tokens; the skill's `claude -p` runs over session auth with no per-call billing. For an autonomous background drill you are already paying workflow tokens, and `claude -p`'s latency advantage (the reason for [ADR-003](../docs/ADR-003-claude-print-orchestrator.md)) is invisible when nobody is watching round-by-round — so the trade is worth it *here*, and only here.

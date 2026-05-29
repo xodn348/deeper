@@ -2,7 +2,7 @@
 // pure tree state machine + a sync-guard that the workflow's inlined CORE block
 // matches the canonical module. Run:  node tests/test-drill-core.mjs
 //
-// Fits deeper's mock-driven testing culture (cf. tests/test-answer-mock.sh):
+// Fits deeper's mock-driven testing culture (cf. legacy/tests/test-answer-mock.sh):
 // the drill loop is exercised end-to-end by feeding SCRIPTED answer objects in
 // place of the agent() calls, so the entire control logic is verified for free.
 
@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import {
   initTree, findOpenLeaf, walk, ancestorChain,
   applyAnswer, judge, bedrockSurvives, render, runDrill, promoteBans,
-} from '../nodes/deeper/drill-core.mjs'
+} from '../workflows/drill-core.mjs'
 
 let pass = 0, fail = 0
 function ok(cond, msg) { if (cond) { pass++ } else { fail++; console.error('  ✗ FAIL:', msg) } }
@@ -259,7 +259,7 @@ const scripted = (answers) => { let i = 0; return async () => answers[i++] }
 // ---- 26. SYNC GUARD: workflow's inlined CORE == canonical module CORE ----
 {
   const dir = import.meta.dirname
-  const moduleSrc = readFileSync(join(dir, '..', 'nodes', 'deeper', 'drill-core.mjs'), 'utf8')
+  const moduleSrc = readFileSync(join(dir, '..', 'workflows', 'drill-core.mjs'), 'utf8')
   const wfSrc = readFileSync(join(dir, '..', 'workflows', 'deeper-native.js'), 'utf8')
   const extract = (s) => { const m = s.match(/\/\* CORE:BEGIN \*\/([\s\S]*?)\/\* CORE:END \*\//); return m ? m[1] : null }
   const norm = (s) => (s || '').replace(/\s+/g, ' ').trim()

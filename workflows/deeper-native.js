@@ -4,7 +4,7 @@
 // from a vanilla dynamic workflow.
 //
 // The block between CORE:BEGIN / CORE:END is a verbatim MIRROR of
-// nodes/deeper/drill-core.mjs (workflow scripts are sandboxed and cannot import
+// workflows/drill-core.mjs (workflow scripts are sandboxed and cannot import
 // local files). It is sync-guarded by tests/test-drill-core.mjs — if you edit
 // the engine, edit drill-core.mjs and paste the same block here, or the test fails.
 
