@@ -12,18 +12,21 @@ deeper runs as a **native dynamic workflow** ([`workflows/deeper-native.js`](./w
 # 1. clone
 git clone https://github.com/xodn348/deeper.git ~/code/deeper
 
-# 2. install the workflow (one-time symlink)
-mkdir -p ~/.claude/workflows
+# 2. install (one-time symlinks): the slash command + the workflow it runs
+mkdir -p ~/.claude/skills ~/.claude/workflows
+ln -s ~/code/deeper/skills/deeper            ~/.claude/skills/deeper
 ln -s ~/code/deeper/workflows/deeper-native.js ~/.claude/workflows/deeper-native.js
 ```
 
-Then, inside Claude Code:
+Then, inside Claude Code, just use the slash command:
 
 ```
-Workflow({ name: "deeper-native", args: { seed: "why does our checkout funnel keep regressing?" } })
+/deeper why does our checkout funnel keep regressing?
 ```
 
-The drill runs **Bootstrap → Drill/Verify → Evolve**, terminates when every leaf reaches a verified bedrock (or the cap), and persists lessons to `~/.deeper/runs/deeper-native/` so the next drill starts smarter. Verify the engine offline first ($0, no LLM):
+`/deeper` is a thin skill that launches the `deeper-native` workflow with your claim as the seed — you never type a `Workflow(...)` call yourself. (That call is the *internal* tool invocation the skill makes on your behalf; if you ever want to drive it directly you can, but `/deeper <claim>` is the intended UX.) The drill runs **Bootstrap → Drill/Verify → Evolve**, streams live under `/workflows`, terminates when every leaf reaches a verified bedrock (or the cap), and persists lessons to `~/.deeper/runs/deeper-native/` so the next drill starts smarter.
+
+Verify the engine offline first ($0, no LLM):
 
 ```bash
 node tests/test-drill-core.mjs   # 59 assertions
