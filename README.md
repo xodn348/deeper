@@ -286,6 +286,21 @@ MODEL_CMD="claude -p" bash harness/meta-loop.sh commit-msg nodes/commit-msg/samp
 
 Anything that reads a prompt on stdin and writes the response on stdout works — `gemini`, `codex exec`, etc.
 
+## deeper-native — the drill as a native dynamic workflow
+
+The `/deeper` skill hand-builds its orchestration in bash: a single-turn launcher loop ([ADR-002](./docs/ADR-002-main-session-orchestrator.md)) to dodge a `judge_result` race, the `judge.sh` exit code as the done-signal, `Monitor` for progress, a cwd contract. That is scaffolding to *simulate* a deterministic orchestration runtime — and the dynamic Workflow tool **is** that runtime. **`deeper-native`** ([`workflows/deeper-native.js`](./workflows/deeper-native.js)) re-homes deeper's philosophy — ralph cold-context loop, DFS-to-bedrock, disciplined termination — directly onto it, and closes the self-improvement flywheel inside one workflow:
+
+    Bootstrap (load BANS) → Drill / Verify (cold Q/A + parallel skeptic gate) → Evolve (record · promote · persist)
+
+What the runtime buys for free: the ADR-002 race cannot exist in a JS `while` loop (no turn boundaries), and a **schema-typed discriminated-union answer** (`descend | bedrock | branch | stop`) makes termination reliable — the answerer emits a *typed* bedrock, so there is no prose-buried `BEDROCK:` to miss (the recognition failure that can leave a drill non-terminating; cf. [`examples/ecdsa-drift`](./examples/ecdsa-drift/), 50 rounds, nothing closed). The DFS / judge / promotion logic is a pure, $0-unit-tested engine ([`nodes/deeper/drill-core.mjs`](./nodes/deeper/drill-core.mjs)); agents do all filesystem I/O. Across runs it self-improves: each drill promotes recurring violations to a persisted `BANS` store the next drill loads — deeper's `feedback.sh` flywheel, automatic.
+
+This is the **autonomous** drill (deeper's default `auto` mode) on the Workflow runtime — not a replacement for the interactive `/deeper` skill, which keeps `claude -p` / session auth. Full principle, architecture, quick start, philosophy, and a *"how this differs from a vanilla dynamic workflow"* table live in **[`workflows/README.md`](./workflows/README.md)**.
+
+```bash
+ln -s ~/code/deeper/workflows/deeper-native.js ~/.claude/workflows/deeper-native.js   # one-time install
+node tests/test-drill-core.mjs                                                          # 59 assertions, $0
+```
+
 ## Examples — recorded runs
 
 Two worked drills with full traces (tree, events, digest, outcome).
@@ -308,11 +323,17 @@ nodes/
 │   ├── PROMPT.md           # role + pressure ladder + Ontologist 4Q
 │   ├── BANS.md             # accumulated lessons (read by subagent every round)
 │   ├── model.py            # iteration-tree driver: mutates tree.json after each user reply
+│   ├── drill-core.mjs      # pure engine (DFS state machine + promoteBans) for deeper-native
 │   ├── judge.sh            # done = no open leaves; flags shallow-bedrock
 │   ├── render.sh           # tree.json → human-readable view
 │   ├── sample-seed.md
 │   └── hard-cap.txt        # 20
 └── commit-msg/             # reference verification node (autonomous, mock-driven)
+
+workflows/
+├── deeper-native.js        # the drill as a native dynamic workflow (Bootstrap→Drill→Verify→Evolve)
+└── README.md               # deeper-native: principle, architecture, quick start, vs vanilla
+tests/test-drill-core.mjs   # $0 engine + promotion + sync-guard suite (59 assertions)
 
 skills/deeper/SKILL.md      # Claude Code orchestrator for the deeper node
 runs/<node>/<run-id>/       # per-run state: seed.md, tree.json, state.md, events.jsonl, outcome.json
