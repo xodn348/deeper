@@ -9,14 +9,15 @@ deeper runs as a **native dynamic workflow** ([`workflows/deeper-native.js`](./w
 ## Quick start
 
 ```bash
-# 1. clone
-git clone https://github.com/xodn348/deeper.git ~/code/deeper
+# 1. clone anywhere you like — no fixed path required
+git clone https://github.com/xodn348/deeper.git
+cd deeper
 
-# 2. install — wires /deeper + the deeper-native workflow into Claude Code
-bash ~/code/deeper/install.sh
+# 2. install — wires /deeper + the deeper-native workflow into your Claude Code
+./install.sh
 ```
 
-`install.sh` is idempotent (re-run any time) and path-agnostic (resolves the repo from its own location, honors `$CLAUDE_CONFIG_DIR`). It symlinks the `/deeper` skill and the `deeper-native` workflow into `~/.claude/` and verifies both resolve.
+`install.sh` adapts to **your** environment, not ours: it resolves the repo from its own location (clone it anywhere) and installs into `$CLAUDE_CONFIG_DIR` (default `~/.claude`), so nothing assumes a `~/code/deeper` layout. It's idempotent — re-run any time — and verifies both symlinks resolve.
 
 Then, inside Claude Code, just use the slash command:
 
@@ -48,10 +49,13 @@ The cursor is always the DFS-deepest open leaf. Each round:
 1. **Find** `cursor` — the deepest open leaf.
 2. **Build the ancestor chain** — root → … → cursor (never siblings, never the whole tree).
 3. **Cold Q agent** generates ONE depth question from the prompt + binding lessons + ancestor chain.
-4. **Cold A agent** answers with a **schema-typed** verdict: `descend | bedrock | branch | stop`.
-5. **If the answer claims `bedrock`**, the adversarial gate fires (below) before the leaf may close.
-6. **Mutate the tree**: `descend` → append child, cursor goes deeper · `bedrock` → close leaf, pop to next open · `branch` → append sibling, jump.
-7. **Done** when no open leaf remains (every leaf closed at a *verified* bedrock), or on `spinning` / `cap`.
+4. **Fan out** `answer_fanout` cold A agents (default 3) **in `parallel()`**, each forced down a *different* drilling angle (mechanism · hidden assumption · boundary · root-vs-symptom · incentive · …). Every candidate is a **schema-typed** verdict: `descend | bedrock | branch | stop`.
+5. **A judge agent picks** the candidate that drills deepest toward bedrock (most specific, most genuinely contestable; a justified bedrock outranks a weak restatement). Only that one answer moves the cursor — the rest are discarded.
+6. **If the chosen answer claims `bedrock`**, the adversarial gate fires (below) before the leaf may close.
+7. **Mutate the tree**: `descend` → append child, cursor goes deeper · `bedrock` → close leaf, pop to next open · `branch` → append sibling, jump.
+8. **Done** when no open leaf remains (every leaf closed at a *verified* bedrock), or on `spinning` / `cap`.
+
+This per-round fan-out is **why the drill runs on the Workflow runtime rather than a single skill loop**: every round gets `answer_fanout` independent attempts at the next step (not one), and the judge keeps the best — so a single weak or lazy answer can't set the direction of the whole descent.
 
 Every round runs in **cold context** — a fresh agent that sees only the prompt + lessons + ancestor chain, never the running session. That is what holds depth-first discipline across many rounds without the model rationalizing its own earlier reasoning.
 
@@ -81,13 +85,16 @@ A live drill on seed *"why does our checkout funnel keep regressing?"* (`cap 4`)
      named function. The missing guard is downstream of a missing *named invariant*.
 ```
 
-Hit `auto_cap` at round 4 (cap was 4); R4's "missing named invariant" is the next bedrock candidate. The whole drill was **10 agents**: Bootstrap + Evolve (2) plus one cold **Q + A** per round (4 × 2). It stayed on one thread the entire way down.
+Hit `auto_cap` at round 4 (cap was 4); R4's "missing named invariant" is the next bedrock candidate. Each line is the answer the drill descended on that round — under the per-round fan-out it is the judge's pick from `answer_fanout` parallel candidates. It stayed on one thread the entire way down.
 
-### The fan-out — the adversarial bedrock gate
+### Two fan-outs — generate, then verify
 
-A leaf is **not** allowed to close on the A agent's say-so. When (and only when) an answer claims `bedrock`, `verify_fanout` skeptic agents — default 3 — fan out in **`parallel()`**, each trying to *refute* the claim with one more honest "why?". Majority-refute rejects the bedrock and forces one more descent into the strongest skeptic's deeper claim. This is the single place breadth enters — in service of depth, never to widen the thread.
+The drill fans out subagents at **two** points, both via `parallel()`:
 
-So the fan-out is a *verification* step at the bottom of the chain, not a per-round answer tournament: a normal round is one cold Q + one cold A, and the skeptics spin up only at a candidate bedrock. (In the run above, no answer claimed bedrock, which is exactly why the agent count is `2 + 4×2 = 10` with zero skeptics.)
+- **Per round (generate → select).** `answer_fanout` candidate answers are produced in parallel from distinct angles, and a judge keeps the deepest. This is the primary fan-out — it runs *every* round, and it is the reason the drill needs a workflow runtime rather than a single chat loop.
+- **At a bedrock candidate (verify).** A leaf is **not** allowed to close on the chosen answer's say-so. When the judge's pick claims `bedrock`, `verify_fanout` skeptic agents (default 3) fan out in parallel, each trying to *refute* it with one more honest "why?". Majority-refute rejects the bedrock and forces one more descent into the strongest skeptic's deeper claim.
+
+Both are breadth strictly in service of depth — generating better next steps and stress-testing terminal ones — never to widen the thread into sibling topics.
 
 ### How binding lessons shape paths
 

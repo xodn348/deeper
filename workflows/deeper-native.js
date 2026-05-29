@@ -180,8 +180,13 @@ const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (a
 const DEFAULT_SEED = 'Each deeper round must run in COLD context (a fresh process whose only input is the prompt + accumulated lessons + the ancestor chain — never the running session history).'
 const SEED = (typeof A.seed === 'string' && A.seed.trim()) ? A.seed.trim() : DEFAULT_SEED
 const FANOUT = Math.max(1, Math.min(7, Number(A.verify_fanout) || 3))
-// Rough budget heuristic: a plain round ~ one Q + one A; a bedrock round adds FANOUT skeptics.
-const PER_ROUND = 80000 + FANOUT * 30000
+// Per-round answer fan-out: each round sprays ANSWER_FANOUT cold candidate answers
+// (different drilling angles) in parallel, then a judge picks the deepest. THIS is
+// what the workflow runtime buys — N independent attempts per round, not one.
+const ANSWER_FANOUT = Math.max(1, Math.min(7, Number(A.answer_fanout) || 3))
+// Rough budget heuristic: each round = one Q + ANSWER_FANOUT candidates + one judge;
+// a bedrock round additionally spins up FANOUT skeptics.
+const PER_ROUND = 45000 + ANSWER_FANOUT * 35000 + FANOUT * 30000
 const CAP = Math.max(4, Math.min(30, Number(A.cap) || (budget && budget.total ? Math.floor(budget.total / PER_ROUND) : 12)))
 let bans = Array.isArray(A.bans) ? [...A.bans] : []
 
@@ -234,6 +239,28 @@ const VERDICT_SCHEMA = {
   },
 }
 
+// Each per-round candidate is forced down a DIFFERENT angle so the fan-out is
+// genuinely diverse (not N near-identical answers).
+const ANGLES = [
+  'mechanism — name the concrete causal step that makes the active claim true',
+  'hidden assumption — surface what must already be true for it to hold',
+  'boundary / counterexample — find where it breaks, or a case it fails',
+  'root-vs-symptom — strip this away; does the underlying thing persist?',
+  'incentive / constraint — whose decision or which hard limit forces it',
+  'concrete instance — demand one specific, dated, named example',
+  'definition — what IS this, really, at the most precise level',
+]
+
+// The judge's pick over the round's candidate answers.
+const SELECT_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  required: ['index', 'reason'],
+  properties: {
+    index: { type: 'integer', description: '0-based index of the candidate that drills DEEPEST toward bedrock: most specific, most genuinely contestable, best-grounded. A correctly-justified bedrock outranks a weak/restating descend.' },
+    reason: { type: 'string', description: 'one sentence: why this candidate wins' },
+  },
+}
+
 function buildCtx(chain, active) {
   return `${PROMPT}
 
@@ -246,17 +273,42 @@ ${chain.map((c, i) => `${i}. ${c}`).join('\n')}
 ACTIVE CLAIM to drill: "${active.claim}"`
 }
 
-// answerFn: one cold Q agent + one cold schema-typed A agent.
+// answerFn: one cold Q agent, then ANSWER_FANOUT cold candidate A agents IN
+// PARALLEL (each a different drilling angle), then a judge picks the deepest.
+// This is the per-round fan-out — the reason the drill lives on the workflow
+// runtime: parallel() gives N independent attempts every round, and the judge
+// selects the one that descends hardest toward bedrock before the cursor moves.
 async function answerFn(round, { chain, active }) {
   const ctx = buildCtx(chain, active)
   const q = (await agent(
     `${ctx}\n\nEmit EXACTLY ONE depth question targeting the ACTIVE CLAIM. No preamble, one line.`,
     { label: `R${round}·Q`, phase: 'Drill' }
   )).trim()
-  return agent(
-    `${ctx}\n\nThe interview is autonomous — you stand in for the most honest, informed respondent.\nQUESTION: ${q}\n\nAnswer it by drilling one level deeper, OR declare bedrock if the honest "why?" is now terminal, OR branch a genuinely parallel cause, OR stop.\nIf kind="bedrock" you MUST set category to one of: ${BEDROCK_CATEGORIES.join(', ')}. If kind="descend" or "branch" you MUST set claim.`,
-    { label: `R${round}·A`, phase: 'Drill', schema: ANSWER_SCHEMA }
-  )
+
+  const ask = (k) =>
+    `${ctx}\n\nThe interview is autonomous — you stand in for the most honest, informed respondent.\nQUESTION: ${q}\n\nYou are candidate #${k + 1} of ${ANSWER_FANOUT}. Drill specifically from THIS angle: ${ANGLES[k % ANGLES.length]}.\nAnswer by drilling one level deeper, OR declare bedrock if the honest "why?" is now terminal, OR branch a genuinely parallel cause, OR stop.\nIf kind="bedrock" you MUST set category to one of: ${BEDROCK_CATEGORIES.join(', ')}. If kind="descend" or "branch" you MUST set claim.`
+
+  // FAN OUT: N candidate answers in parallel, each forced down a distinct angle.
+  const candidates = (await parallel(Array.from({ length: ANSWER_FANOUT }, (_, k) => () =>
+    agent(ask(k), { label: `R${round}·A${k + 1}`, phase: 'Drill', schema: ANSWER_SCHEMA })
+  ))).filter(Boolean)
+
+  if (candidates.length === 0) return { kind: 'stop', depth_delta: 0, rationale: 'no candidate answer survived' }
+  if (candidates.length === 1) return candidates[0]
+
+  // JUDGE: pick the candidate that drills deepest toward bedrock.
+  const list = candidates.map((c, i) =>
+    `[${i}] kind=${c.kind}${c.category ? '/' + c.category : ''} Δ${c.depth_delta} ${c.kind === 'bedrock' ? '(bedrock)' : JSON.stringify(c.claim || '')} — ${c.rationale}`
+  ).join('\n')
+  try {
+    const sel = await agent(
+      `${ctx}\n\nQUESTION asked this round: ${q}\n\n${candidates.length} candidate answers were generated, each from a different angle. Pick the ONE that drills DEEPEST toward bedrock — most specific, most genuinely contestable, best-grounded. Reject restatements and any that widen the scope.\n\nCANDIDATES:\n${list}`,
+      { label: `R${round}·judge`, phase: 'Drill', schema: SELECT_SCHEMA }
+    )
+    if (sel && Number.isInteger(sel.index) && sel.index >= 0 && sel.index < candidates.length) return candidates[sel.index]
+  } catch (_) { /* fall through to heuristic */ }
+  // fallback if the judge fails: deepest by depth_delta.
+  return candidates.reduce((best, c) => (c.depth_delta > best.depth_delta ? c : best), candidates[0])
 }
 
 // verifyFn: FANOUT skeptics try to refute the bedrock candidate, in parallel.

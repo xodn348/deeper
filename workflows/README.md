@@ -88,7 +88,7 @@ This closes the loop deeper's framework is built around (`legacy/harness/meta-lo
 ```
 
 - **`workflows/drill-core.mjs`** — canonical pure engine: the DFS state machine, `runDrill`, and `promoteBans` (the feedback/promotion logic). No agents, no FS, no clock. Exported for tests.
-- **`workflows/deeper-native.js`** — the workflow. Inlines a verbatim copy of the engine's `CORE` block (workflow scripts are sandboxed and cannot `import` local files), then adds: a **Bootstrap** agent (reads the store), the agent-driven `answerFn`, the `parallel()` `verifyFn`, and an **Evolve** agent (records the run, promotes recurring violations, persists). The script body itself never touches the filesystem.
+- **`workflows/deeper-native.js`** — the workflow. Inlines a verbatim copy of the engine's `CORE` block (workflow scripts are sandboxed and cannot `import` local files), then adds: a **Bootstrap** agent (reads the store), the **per-round fan-out** `answerFn` (a cold Q, then `answer_fanout` candidate A's in `parallel()` from distinct angles, then a judge that keeps the deepest), the `parallel()` `verifyFn` bedrock gate, and an **Evolve** agent (records the run, promotes recurring violations, persists). The script body itself never touches the filesystem.
 - **`tests/test-drill-core.mjs`** — 25 fixtures over the pure engine (feeding scripted answers in place of `agent()`, plus `promoteBans` promotion cases), and a **sync-guard** asserting the workflow's inlined `CORE` block is byte-identical (whitespace-normalized) to the module. 59 assertions, $0, no LLM.
 
 ---
@@ -114,6 +114,7 @@ Workflow({ name: "deeper-native", args: { seed: "Why does our checkout funnel ke
 |----------------|---------|----------------------------------------------------------------|
 | `seed`         | (a self-referential demo claim) | the claim to drill to bedrock            |
 | `cap`          | 12 (or budget-scaled) | max rounds; if a token budget is set, scales with it |
+| `answer_fanout`| 3       | candidate answers fanned out **per round**; a judge keeps the deepest |
 | `verify_fanout`| 3       | skeptics per bedrock candidate (the adversarial gate)          |
 | `bans`         | `[]`    | extra binding lessons to inject (merged on top of the auto-loaded ones) |
 
