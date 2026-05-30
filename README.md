@@ -3,16 +3,13 @@
 ![License](https://img.shields.io/badge/license-Sustainable%20Use%201.0-blue)
 
 <p align="center">
-  <img src="docs/assets/deeper-demo.gif" alt="deeper drilling live under Claude Code's /workflows — cold subagents fan out in parallel each round, a judge keeps the deepest answer, the cursor descends to bedrock" width="100%">
+  <img src="docs/assets/deeper-landing.png" alt="deeper — drill one claim to bedrock: parallel fan-out each round, a judge keeps the deepest answer, the cursor descends. The live /workflows view, recreated." width="100%">
   <br>
-  <em>The drill running as a Claude Code dynamic workflow — live under <code>/workflows</code>: each round fans out cold subagents in parallel, a judge keeps the deepest answer, and the cursor descends to bedrock.</em>
+  <em>deeper drills one claim to bedrock — each round fans out cold subagents in parallel, a judge keeps the deepest answer, the cursor descends. Landing page lives in <a href="./site/index.html"><code>site/</code></a>.</em>
 </p>
 
-<!-- Anatomy still (optional): drop docs/assets/deeper-tree.png and uncomment
-<p align="center">
-  <img src="docs/assets/deeper-tree.png" alt="anatomy of a deeper drill tree: cursor, ancestor chain, judge-selected candidate, closed bedrock leaf" width="80%">
-</p>
--->
+<!-- Live /workflows demo GIF (optional): record the drill, then
+     scripts/make-demo-gif.sh <clip.mov> → docs/assets/deeper-demo.gif and swap it in here. -->
 
 A self-improving [ralph loop](https://ghuntley.com/ralph/) for **depth-first interviewing** — it drills ONE claim to its bedrock (first principle / axiom / source of truth) instead of widening. Every other interview skill (`superpowers:brainstorming`, `omx:deep-interview`, `gstack:office-hours`, `ouroboros`) is built to *keep breadth* and fight tunneling. deeper does the opposite: it commits to one claim and refuses to widen until that claim reaches bedrock — and it gets better run-over-run by promoting recurring mistakes into binding lessons.
 
